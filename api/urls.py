@@ -5,6 +5,9 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # Health check
+    path('health', views.health, name='health'),
+    
     # Пользовательские endpoints
     path('register', views.register, name='register'),
     path('wallet', views.wallet, name='wallet'),

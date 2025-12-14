@@ -15,6 +15,41 @@ from .decorators import admin_token_required
 
 
 @csrf_exempt
+@require_http_methods(["GET"])
+def health(request):
+    """
+    GET /api/v1/health
+    Health check endpoint для проверки работоспособности сервера.
+    """
+    from django.db import connection
+    from django.conf import settings
+    
+    try:
+        # Проверка подключения к БД
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        
+        # Проверка настроек
+        checks = {
+            'status': 'ok',
+            'database': 'connected',
+            'django_version': 'ok',
+            'settings': {
+                'debug': settings.DEBUG,
+                'has_admin_token': bool(settings.X_ADMIN_TOKEN),
+                'has_receiver_wallet': bool(settings.RECEIVER_WALLET),
+            }
+        }
+        
+        return JsonResponse(checks, status=200)
+    except Exception as e:
+        return JsonResponse({
+            'status': 'error',
+            'error': str(e)
+        }, status=500)
+
+
+@csrf_exempt
 @require_http_methods(["POST"])
 def register(request):
     """
