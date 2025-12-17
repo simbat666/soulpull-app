@@ -6,7 +6,7 @@ class UserProfile(models.Model):
     """
     Профиль пользователя, связанный с Telegram ID.
     """
-    telegram_id = models.BigIntegerField(unique=True, db_index=True, help_text="Telegram user ID")
+    telegram_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True, help_text="Telegram user ID")
     wallet_address = models.CharField(max_length=64, blank=True, null=True, help_text="TON wallet address")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -19,7 +19,12 @@ class UserProfile(models.Model):
         ]
 
     def __str__(self):
-        return f"UserProfile(telegram_id={self.telegram_id})"
+        if self.telegram_id:
+            return f"UserProfile(telegram_id={self.telegram_id})"
+        elif self.wallet_address:
+            return f"UserProfile(wallet={self.wallet_address[:8]}...)"
+        else:
+            return f"UserProfile(id={self.id})"
 
 
 class AuthorCode(models.Model):

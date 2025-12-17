@@ -2,9 +2,234 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Soulpull test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soulpull - TON Connect</title>
+    <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 16px;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: block;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: block;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            display: block;
+        }
+        
+        .wallet-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .wallet-info.active {
+            display: block;
+        }
+        
+        .wallet-address {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            word-break: break-all;
+            color: #333;
+            margin-top: 10px;
+        }
+        
+        #connect-button {
+            width: 100%;
+            padding: 15px;
+            background: #0088cc;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        #connect-button:hover {
+            background: #006ba3;
+        }
+        
+        #connect-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .api-url {
+            font-size: 12px;
+            color: #999;
+            margin-top: 20px;
+            text-align: center;
+        }
+    </style>
 </head>
 <body>
-    <h1>Сайт работае66а! 🚀</h1>
+    <div class="container">
+        <h1>🚀 Soulpull</h1>
+        <p class="subtitle">Подключите TON кошелек для регистрации</p>
+        
+        <div id="status" class="status"></div>
+        
+        <button id="connect-button" onclick="connectWallet()">
+            Подключить кошелек
+        </button>
+        
+        <div id="wallet-info" class="wallet-info">
+            <strong>Кошелек подключен:</strong>
+            <div class="wallet-address" id="wallet-address"></div>
+        </div>
+        
+        <div class="api-url">API: <span id="api-url"></span></div>
+    </div>
+
+    <script>
+        // Определяем API URL
+        const API_BASE = window.location.origin + '/api/v1';
+        document.getElementById('api-url').textContent = API_BASE;
+        
+        let walletAddress = null;
+        
+        // Инициализация TON Connect UI
+        const tonConnectUI = new TON_CONNECT_UI.TONConnectUI({
+            manifestUrl: window.location.origin + '/tonconnect-manifest.json',
+            language: 'ru'
+        });
+        
+        // Проверка существующего подключения
+        tonConnectUI.connectionRestored.then(() => {
+            const account = tonConnectUI.account;
+            if (account) {
+                walletAddress = account.address;
+                handleWalletConnected(walletAddress);
+            }
+        });
+        
+        // Обработка подключения кошелька
+        tonConnectUI.onStatusChange((wallet) => {
+            if (wallet) {
+                walletAddress = wallet.account.address;
+                handleWalletConnected(walletAddress);
+            } else {
+                walletAddress = null;
+                document.getElementById('wallet-info').classList.remove('active');
+                showStatus('Кошелек отключен', 'info');
+            }
+        });
+        
+        async function connectWallet() {
+            try {
+                showStatus('Подключение кошелька...', 'info');
+                await tonConnectUI.openModal();
+            } catch (error) {
+                showStatus('Ошибка подключения: ' + error.message, 'error');
+            }
+        }
+        
+        async function handleWalletConnected(address) {
+            showStatus('Кошелек подключен! Регистрация...', 'info');
+            
+            try {
+                // Отправляем запрос на регистрацию
+                const response = await fetch(API_BASE + '/register-wallet', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        wallet_address: address
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    showStatus(
+                        data.created 
+                            ? '✅ Регистрация успешна! Добро пожаловать!' 
+                            : '✅ Вы уже зарегистрированы!',
+                        'success'
+                    );
+                    document.getElementById('wallet-address').textContent = address;
+                    document.getElementById('wallet-info').classList.add('active');
+                } else {
+                    showStatus('Ошибка регистрации: ' + (data.error || 'Неизвестная ошибка'), 'error');
+                }
+            } catch (error) {
+                showStatus('Ошибка при отправке запроса: ' + error.message, 'error');
+                console.error('Registration error:', error);
+            }
+        }
+        
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = 'status ' + type;
+            
+            if (type === 'success' || type === 'error') {
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 5000);
+            }
+        }
+    </script>
 </body>
 </html>

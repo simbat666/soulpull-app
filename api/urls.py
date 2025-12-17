@@ -10,6 +10,7 @@ urlpatterns = [
     
     # Пользовательские endpoints
     path('register', views.register, name='register'),
+    path('register-wallet', views.register_wallet, name='register_wallet'),
     path('wallet', views.wallet, name='wallet'),
     path('intent', views.intent, name='intent'),
     path('me', views.me, name='me'),

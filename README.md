@@ -1,6 +1,35 @@
 # Soulpull Django Backend
 
-Django-бэкенд для проекта Soulpull с API v1.
+Django-бэкенд для проекта Soulpull с API v1 и интеграцией TON Connect.
+
+## Быстрый старт
+
+1. Установите зависимости:
+```bash
+pip install -r requirements.txt
+```
+
+2. Создайте `.env` файл (скопируйте из `.env.example` и заполните):
+```bash
+cp .env.example .env
+```
+
+3. Выполните миграции:
+```bash
+python manage.py makemigrations
+python manage.py migrate
+```
+
+4. Запустите сервер:
+```bash
+python manage.py runserver
+```
+
+5. Откройте в браузере: http://localhost:8000
+
+## TON Connect
+
+На главной странице доступна интеграция с TON Connect. При подключении кошелька происходит автоматическая регистрация пользователя через endpoint `/api/v1/register-wallet`.
 
 ## Установка
 

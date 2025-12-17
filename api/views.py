@@ -3,7 +3,7 @@ API views для Soulpull.
 """
 import json
 from decimal import Decimal, InvalidOperation
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.utils.decorators import method_decorator
@@ -15,12 +15,19 @@ from .decorators import admin_token_required
 
 
 @csrf_exempt
-@require_http_methods(["GET"])
+@require_http_methods(["GET", "OPTIONS"])
 def health(request):
     """
     GET /api/v1/health
     Health check endpoint для проверки работоспособности сервера.
     """
+    if request.method == 'OPTIONS':
+        response = HttpResponse()
+        response["Access-Control-Allow-Origin"] = "*"
+        response["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        response["Access-Control-Allow-Headers"] = "Content-Type"
+        return response
+    
     from django.db import connection
     from django.conf import settings
     
@@ -41,12 +48,16 @@ def health(request):
             }
         }
         
-        return JsonResponse(checks, status=200)
+        response = JsonResponse(checks, status=200)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
     except Exception as e:
-        return JsonResponse({
+        response = JsonResponse({
             'status': 'error',
             'error': str(e)
         }, status=500)
+        response["Access-Control-Allow-Origin"] = "*"
+        return response
 
 
 @csrf_exempt
@@ -99,6 +110,65 @@ def register(request):
             'telegram_id': user.telegram_id,
             'created': created
         }, status=201 if created else 200)
+
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def register_wallet(request):
+    """
+    POST /api/v1/register-wallet
+    Упрощенная регистрация через TON Connect (только wallet_address).
+    Создает или обновляет пользователя по адресу кошелька.
+    
+    Body: {
+        "wallet_address": str
+    }
+    """
+    if request.method == 'OPTIONS':
+        response = HttpResponse()
+        response["Access-Control-Allow-Origin"] = "*"
+        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response["Access-Control-Allow-Headers"] = "Content-Type"
+        return response
+    
+    try:
+        data = json.loads(request.body)
+        wallet_address = data.get('wallet_address')
+
+        if not wallet_address:
+            return JsonResponse(
+                {'error': 'wallet_address is required'},
+                status=400
+            )
+
+        # Ищем пользователя с таким wallet_address
+        user = UserProfile.objects.filter(wallet_address=wallet_address).first()
+        
+        if user:
+            created = False
+        else:
+            # Создаем нового пользователя без telegram_id (telegram_id может быть null)
+            user = UserProfile.objects.create(wallet_address=wallet_address)
+            created = True
+
+        response = JsonResponse({
+            'success': True,
+            'user_id': user.id,
+            'wallet_address': user.wallet_address,
+            'created': created
+        }, status=201 if created else 200)
+        
+        # Добавляем CORS заголовки
+        response["Access-Control-Allow-Origin"] = "*"
+        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response["Access-Control-Allow-Headers"] = "Content-Type"
+        
+        return response
 
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
