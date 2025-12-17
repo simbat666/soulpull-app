@@ -9,6 +9,8 @@ from django.views.decorators.http import require_http_methods
 from django.utils.decorators import method_decorator
 from django.db import transaction
 from django.utils import timezone
+import json as _jsonlib
+import time
 
 from .models import UserProfile, AuthorCode, Participation, PayoutRequest
 from .decorators import admin_token_required
@@ -168,11 +170,49 @@ def register_wallet(request):
         response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
         response["Access-Control-Allow-Headers"] = "Content-Type"
         
+        # #region agent log
+        try:
+            with open('/Users/dmitrijmitin/projects/.cursor/debug.log', 'a') as dbg:
+                dbg.write(_jsonlib.dumps({
+                    "sessionId": "debug-session",
+                    "runId": "run1",
+                    "hypothesisId": "H3",
+                    "location": "api/views.py:register_wallet",
+                    "message": "register_wallet success",
+                    "data": {
+                        "wallet_address": wallet_address,
+                        "created": created,
+                        "user_id": user.id,
+                        "status": response.status_code
+                    },
+                    "timestamp": int(time.time() * 1000)
+                }) + "\n")
+        except Exception:
+            pass
+        # #endregion
+
         return response
 
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
     except Exception as e:
+        # #region agent log
+        try:
+            with open('/Users/dmitrijmitin/projects/.cursor/debug.log', 'a') as dbg:
+                dbg.write(_jsonlib.dumps({
+                    "sessionId": "debug-session",
+                    "runId": "run1",
+                    "hypothesisId": "H3",
+                    "location": "api/views.py:register_wallet",
+                    "message": "register_wallet error",
+                    "data": {
+                        "error": str(e)
+                    },
+                    "timestamp": int(time.time() * 1000)
+                }) + "\n")
+        except Exception:
+            pass
+        # #endregion
         return JsonResponse({'error': str(e)}, status=500)
 
 

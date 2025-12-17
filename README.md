@@ -122,5 +122,44 @@ TONCENTER_API_KEY=your-toncenter-api-key
 gunicorn backend.wsgi:application --bind 0.0.0.0:8000
 ```
 
+## Диагностика проблем
+
+### Сайт не отвечает (ERR_TIMED_OUT)
+
+Если сайт не загружается, выполните на сервере:
+
+1. **Проверка статуса:**
+```bash
+./check-server.sh
+```
+
+2. **Исправление проблем:**
+```bash
+./fix-server.sh
+```
+
+3. **Ручная проверка:**
+```bash
+# Проверка сервиса
+sudo systemctl status soulpull-backend
+
+# Проверка nginx
+sudo systemctl status nginx
+
+# Просмотр логов
+sudo journalctl -u soulpull-backend -n 50
+sudo tail -f /var/log/nginx/error.log
+
+# Перезапуск вручную
+sudo systemctl restart soulpull-backend
+sudo systemctl reload nginx
+```
+
+### TON Connect не работает
+
+1. Проверьте, что манифест доступен: `https://your-domain.com/tonconnect-manifest.json`
+2. Проверьте консоль браузера (F12) на наличие ошибок
+3. Убедитесь, что используется HTTPS (TON Connect требует HTTPS)
+
 
 

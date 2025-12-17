@@ -154,6 +154,9 @@
         function initTONConnect() {
             // Проверяем, что библиотека загружена
             if (typeof TON_CONNECT_UI === 'undefined') {
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'A',location:'index.html:initTONConnect',message:'TON_CONNECT_UI undefined, retry',data:{ready:isReady},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
                 console.log('TON Connect UI library not loaded yet, retrying...');
                 setTimeout(initTONConnect, 300);
                 return;
@@ -168,6 +171,9 @@
                 
                 console.log('✅ TON Connect initialized successfully');
                 isReady = true;
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'A',location:'index.html:initTONConnect',message:'TON Connect initialized',data:{manifestUrl:window.location.origin + '/tonconnect-manifest.json'},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
                 showStatus('TON Connect готов к работе', 'success');
                 setTimeout(() => {
                     const statusEl = document.getElementById('status');
@@ -181,6 +187,9 @@
                     const account = tonConnectUI.account;
                     if (account) {
                         walletAddress = account.address;
+                        // #region agent log
+                        fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'B',location:'index.html:connectionRestored',message:'Connection restored',data:{address:walletAddress},timestamp:Date.now()})}).catch(()=>{});
+                        // #endregion
                         handleWalletConnected(walletAddress);
                     }
                 }).catch(err => {
@@ -191,6 +200,9 @@
                 tonConnectUI.onStatusChange((wallet) => {
                     if (wallet && wallet.account) {
                         walletAddress = wallet.account.address;
+                        // #region agent log
+                        fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'B',location:'index.html:onStatusChange',message:'Wallet connected',data:{address:walletAddress},timestamp:Date.now()})}).catch(()=>{});
+                        // #endregion
                         handleWalletConnected(walletAddress);
                     } else {
                         walletAddress = null;
@@ -200,6 +212,9 @@
                 });
             } catch (error) {
                 console.error('TON Connect initialization error:', error);
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'A',location:'index.html:initTONConnect',message:'Init error',data:{error:String(error)},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
                 showStatus('Ошибка инициализации: ' + error.message, 'error');
             }
         }
@@ -222,6 +237,9 @@
                 if (typeof TON_CONNECT_UI !== 'undefined' && !tonConnectUI) {
                     initTONConnect();
                 }
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'C',location:'index.html:connectWallet',message:'Not ready',data:{isReady,tonConnectUI:!!tonConnectUI},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
                 return;
             }
             
@@ -231,6 +249,9 @@
             } catch (error) {
                 console.error('Connect error:', error);
                 showStatus('Ошибка подключения: ' + (error.message || 'Неизвестная ошибка'), 'error');
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'C',location:'index.html:connectWallet',message:'Connect error',data:{error:String(error)},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
             }
         }
         
@@ -251,6 +272,9 @@
                 
                 const data = await response.json();
                 
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'D',location:'index.html:handleWalletConnected',message:'Register response',data:{status:response.status,ok:response.ok,body:data},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
                 if (response.ok && data.success) {
                     showStatus(
                         data.created 
