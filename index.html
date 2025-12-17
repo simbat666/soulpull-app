@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Soulpull - TON Connect</title>
-    <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -148,15 +147,20 @@
         
         let walletAddress = null;
         let tonConnectUI = null;
+        let isInitializing = false;
         
-        // Ждем загрузки DOM и библиотеки TON Connect
+        // Функция инициализации TON Connect
         function initTONConnect() {
+            if (isInitializing) return;
+            
             // Проверяем, что библиотека загружена
             if (typeof TON_CONNECT_UI === 'undefined') {
-                console.error('TON Connect UI library not loaded');
-                showStatus('Ошибка: библиотека TON Connect не загружена', 'error');
+                console.log('TON Connect UI library not loaded yet, retrying...');
+                setTimeout(initTONConnect, 200);
                 return;
             }
+            
+            isInitializing = true;
             
             try {
                 // Инициализация TON Connect UI
@@ -164,6 +168,8 @@
                     manifestUrl: window.location.origin + '/tonconnect-manifest.json',
                     language: 'ru'
                 });
+                
+                console.log('TON Connect initialized successfully');
                 
                 // Проверка существующего подключения
                 tonConnectUI.connectionRestored.then(() => {
@@ -190,19 +196,61 @@
             } catch (error) {
                 console.error('TON Connect initialization error:', error);
                 showStatus('Ошибка инициализации TON Connect: ' + error.message, 'error');
+                isInitializing = false;
             }
         }
         
-        // Инициализация после загрузки DOM
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                // Даем время на загрузку скрипта TON Connect
-                setTimeout(initTONConnect, 100);
+        // Загрузка скрипта TON Connect динамически
+        function loadTONConnectScript() {
+            return new Promise((resolve, reject) => {
+                // Проверяем, не загружен ли уже скрипт
+                if (typeof TON_CONNECT_UI !== 'undefined') {
+                    resolve();
+                    return;
+                }
+                
+                const script = document.createElement('script');
+                script.src = 'https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js';
+                script.async = true;
+                
+                script.onload = () => {
+                    console.log('TON Connect script loaded');
+                    // Даем немного времени на инициализацию глобального объекта
+                    setTimeout(() => {
+                        if (typeof TON_CONNECT_UI !== 'undefined') {
+                            resolve();
+                        } else {
+                            // Пробуем еще раз через небольшую задержку
+                            setTimeout(() => {
+                                if (typeof TON_CONNECT_UI !== 'undefined') {
+                                    resolve();
+                                } else {
+                                    reject(new Error('TON_CONNECT_UI not available after script load'));
+                                }
+                            }, 500);
+                        }
+                    }, 100);
+                };
+                
+                script.onerror = () => {
+                    reject(new Error('Failed to load TON Connect script'));
+                };
+                
+                document.head.appendChild(script);
             });
-        } else {
-            // DOM уже загружен
-            setTimeout(initTONConnect, 100);
         }
+        
+        // Инициализация после загрузки DOM
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                showStatus('Загрузка TON Connect...', 'info');
+                await loadTONConnectScript();
+                initTONConnect();
+            } catch (error) {
+                console.error('Failed to load TON Connect:', error);
+                showStatus('Ошибка загрузки TON Connect. Проверьте подключение к интернету.', 'error');
+            }
+        });
         
         async function connectWallet() {
             if (!tonConnectUI) {
