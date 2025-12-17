@@ -140,6 +140,7 @@
         <div class="api-url">API: <span id="api-url"></span></div>
     </div>
 
+    <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
     <script>
         // Определяем API URL
         const API_BASE = window.location.origin + '/api/v1';
@@ -147,20 +148,16 @@
         
         let walletAddress = null;
         let tonConnectUI = null;
-        let isInitializing = false;
+        let isReady = false;
         
         // Функция инициализации TON Connect
         function initTONConnect() {
-            if (isInitializing) return;
-            
             // Проверяем, что библиотека загружена
             if (typeof TON_CONNECT_UI === 'undefined') {
                 console.log('TON Connect UI library not loaded yet, retrying...');
-                setTimeout(initTONConnect, 200);
+                setTimeout(initTONConnect, 300);
                 return;
             }
-            
-            isInitializing = true;
             
             try {
                 // Инициализация TON Connect UI
@@ -169,7 +166,15 @@
                     language: 'ru'
                 });
                 
-                console.log('TON Connect initialized successfully');
+                console.log('✅ TON Connect initialized successfully');
+                isReady = true;
+                showStatus('TON Connect готов к работе', 'success');
+                setTimeout(() => {
+                    const statusEl = document.getElementById('status');
+                    if (statusEl.className.includes('success')) {
+                        statusEl.style.display = 'none';
+                    }
+                }, 2000);
                 
                 // Проверка существующего подключения
                 tonConnectUI.connectionRestored.then(() => {
@@ -184,7 +189,7 @@
                 
                 // Обработка подключения кошелька
                 tonConnectUI.onStatusChange((wallet) => {
-                    if (wallet) {
+                    if (wallet && wallet.account) {
                         walletAddress = wallet.account.address;
                         handleWalletConnected(walletAddress);
                     } else {
@@ -195,75 +200,37 @@
                 });
             } catch (error) {
                 console.error('TON Connect initialization error:', error);
-                showStatus('Ошибка инициализации TON Connect: ' + error.message, 'error');
-                isInitializing = false;
+                showStatus('Ошибка инициализации: ' + error.message, 'error');
             }
         }
         
-        // Загрузка скрипта TON Connect динамически
-        function loadTONConnectScript() {
-            return new Promise((resolve, reject) => {
-                // Проверяем, не загружен ли уже скрипт
-                if (typeof TON_CONNECT_UI !== 'undefined') {
-                    resolve();
-                    return;
-                }
-                
-                const script = document.createElement('script');
-                script.src = 'https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js';
-                script.async = true;
-                
-                script.onload = () => {
-                    console.log('TON Connect script loaded');
-                    // Даем немного времени на инициализацию глобального объекта
-                    setTimeout(() => {
-                        if (typeof TON_CONNECT_UI !== 'undefined') {
-                            resolve();
-                        } else {
-                            // Пробуем еще раз через небольшую задержку
-                            setTimeout(() => {
-                                if (typeof TON_CONNECT_UI !== 'undefined') {
-                                    resolve();
-                                } else {
-                                    reject(new Error('TON_CONNECT_UI not available after script load'));
-                                }
-                            }, 500);
-                        }
-                    }, 100);
-                };
-                
-                script.onerror = () => {
-                    reject(new Error('Failed to load TON Connect script'));
-                };
-                
-                document.head.appendChild(script);
-            });
-        }
-        
-        // Инициализация после загрузки DOM
-        document.addEventListener('DOMContentLoaded', async () => {
-            try {
-                showStatus('Загрузка TON Connect...', 'info');
-                await loadTONConnectScript();
-                initTONConnect();
-            } catch (error) {
-                console.error('Failed to load TON Connect:', error);
-                showStatus('Ошибка загрузки TON Connect. Проверьте подключение к интернету.', 'error');
-            }
+        // Инициализация после загрузки страницы
+        window.addEventListener('load', () => {
+            console.log('Page loaded, initializing TON Connect...');
+            initTONConnect();
         });
         
+        // Fallback: если window.load уже произошел
+        if (document.readyState === 'complete') {
+            setTimeout(initTONConnect, 100);
+        }
+        
         async function connectWallet() {
-            if (!tonConnectUI) {
-                showStatus('TON Connect не инициализирован. Пожалуйста, обновите страницу.', 'error');
+            if (!isReady || !tonConnectUI) {
+                showStatus('TON Connect загружается... Пожалуйста, подождите.', 'info');
+                // Пробуем инициализировать еще раз
+                if (typeof TON_CONNECT_UI !== 'undefined' && !tonConnectUI) {
+                    initTONConnect();
+                }
                 return;
             }
             
             try {
-                showStatus('Подключение кошелька...', 'info');
+                showStatus('Открывается окно выбора кошелька...', 'info');
                 await tonConnectUI.openModal();
             } catch (error) {
-                showStatus('Ошибка подключения: ' + error.message, 'error');
                 console.error('Connect error:', error);
+                showStatus('Ошибка подключения: ' + (error.message || 'Неизвестная ошибка'), 'error');
             }
         }
         
