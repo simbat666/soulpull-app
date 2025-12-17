@@ -125,186 +125,115 @@
     <div class="container">
         <h1>🚀 Soulpull</h1>
         <p class="subtitle">Подключите TON кошелек для регистрации</p>
-        
+
         <div id="status" class="status"></div>
-        
-        <button id="connect-button" onclick="connectWallet()">
-            Подключить кошелек
-        </button>
-        
+
+        <!-- Стандартная кнопка TON Connect UI -->
+        <div id="tonconnect-button"></div>
+
         <div id="wallet-info" class="wallet-info">
             <strong>Кошелек подключен:</strong>
             <div class="wallet-address" id="wallet-address"></div>
         </div>
-        
+
         <div class="api-url">API: <span id="api-url"></span></div>
     </div>
 
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
     <script>
-        // Определяем API URL
         const API_BASE = window.location.origin + '/api/v1';
         document.getElementById('api-url').textContent = API_BASE;
-        
-        let walletAddress = null;
+
         let tonConnectUI = null;
-        let isReady = false;
-        
-        // Функция инициализации TON Connect
+
+        function showStatus(message, type = 'info') {
+            const el = document.getElementById('status');
+            el.textContent = message;
+            el.className = 'status ' + type;
+            el.style.display = 'block';
+            if (['success', 'error'].includes(type)) {
+                setTimeout(() => { el.style.display = 'none'; }, 4000);
+            }
+        }
+
+        function showAddress(address) {
+            document.getElementById('wallet-address').textContent = address;
+            document.getElementById('wallet-info').classList.add('active');
+        }
+
+        function hideAddress() {
+            document.getElementById('wallet-info').classList.remove('active');
+            document.getElementById('wallet-address').textContent = '';
+        }
+
         function initTONConnect() {
-            // Проверяем, что библиотека загружена
             if (typeof TON_CONNECT_UI === 'undefined') {
                 // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'A',location:'index.html:initTONConnect',message:'TON_CONNECT_UI undefined, retry',data:{ready:isReady},timestamp:Date.now()})}).catch(()=>{});
+                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'A',location:'index.html:initTONConnect',message:'TON_CONNECT_UI undefined',data:{},timestamp:Date.now()})}).catch(()=>{});
                 // #endregion
-                console.log('TON Connect UI library not loaded yet, retrying...');
-                setTimeout(initTONConnect, 300);
+                showStatus('TON Connect не загрузился, обновите страницу.', 'error');
                 return;
             }
-            
-            try {
-                // Инициализация TON Connect UI
-                tonConnectUI = new TON_CONNECT_UI.TONConnectUI({
-                    manifestUrl: window.location.origin + '/tonconnect-manifest.json',
-                    language: 'ru'
-                });
-                
-                console.log('✅ TON Connect initialized successfully');
-                isReady = true;
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'A',location:'index.html:initTONConnect',message:'TON Connect initialized',data:{manifestUrl:window.location.origin + '/tonconnect-manifest.json'},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
-                showStatus('TON Connect готов к работе', 'success');
-                setTimeout(() => {
-                    const statusEl = document.getElementById('status');
-                    if (statusEl.className.includes('success')) {
-                        statusEl.style.display = 'none';
-                    }
-                }, 2000);
-                
-                // Проверка существующего подключения
-                tonConnectUI.connectionRestored.then(() => {
-                    const account = tonConnectUI.account;
-                    if (account) {
-                        walletAddress = account.address;
-                        // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'B',location:'index.html:connectionRestored',message:'Connection restored',data:{address:walletAddress},timestamp:Date.now()})}).catch(()=>{});
-                        // #endregion
-                        handleWalletConnected(walletAddress);
-                    }
-                }).catch(err => {
-                    console.log('No existing connection:', err);
-                });
-                
-                // Обработка подключения кошелька
-                tonConnectUI.onStatusChange((wallet) => {
-                    if (wallet && wallet.account) {
-                        walletAddress = wallet.account.address;
-                        // #region agent log
-                        fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'B',location:'index.html:onStatusChange',message:'Wallet connected',data:{address:walletAddress},timestamp:Date.now()})}).catch(()=>{});
-                        // #endregion
-                        handleWalletConnected(walletAddress);
-                    } else {
-                        walletAddress = null;
-                        document.getElementById('wallet-info').classList.remove('active');
-                        showStatus('Кошелек отключен', 'info');
-                    }
-                });
-            } catch (error) {
-                console.error('TON Connect initialization error:', error);
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'A',location:'index.html:initTONConnect',message:'Init error',data:{error:String(error)},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
-                showStatus('Ошибка инициализации: ' + error.message, 'error');
-            }
-        }
-        
-        // Инициализация после загрузки страницы
-        window.addEventListener('load', () => {
-            console.log('Page loaded, initializing TON Connect...');
-            initTONConnect();
-        });
-        
-        // Fallback: если window.load уже произошел
-        if (document.readyState === 'complete') {
-            setTimeout(initTONConnect, 100);
-        }
-        
-        async function connectWallet() {
-            if (!isReady || !tonConnectUI) {
-                showStatus('TON Connect загружается... Пожалуйста, подождите.', 'info');
-                // Пробуем инициализировать еще раз
-                if (typeof TON_CONNECT_UI !== 'undefined' && !tonConnectUI) {
-                    initTONConnect();
+
+            tonConnectUI = new TON_CONNECT_UI.TONConnectUI({
+                manifestUrl: window.location.origin + '/tonconnect-manifest.json',
+                buttonRootId: 'tonconnect-button'
+            });
+
+            // #region agent log
+            fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'A',location:'index.html:initTONConnect',message:'TON Connect initialized',data:{manifestUrl:window.location.origin + '/tonconnect-manifest.json'},timestamp:Date.now()})}).catch(()=>{});
+            // #endregion
+
+            // Восстановление ранее подключенного кошелька
+            tonConnectUI.connectionRestored.then(() => {
+                const acc = tonConnectUI.account;
+                if (acc?.address) {
+                    showAddress(acc.address);
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'B',location:'index.html:connectionRestored',message:'Restored address',data:{address:acc.address},timestamp:Date.now()})}).catch(()=>{});
+                    // #endregion
                 }
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'C',location:'index.html:connectWallet',message:'Not ready',data:{isReady,tonConnectUI:!!tonConnectUI},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
-                return;
-            }
-            
-            try {
-                showStatus('Открывается окно выбора кошелька...', 'info');
-                await tonConnectUI.openModal();
-            } catch (error) {
-                console.error('Connect error:', error);
-                showStatus('Ошибка подключения: ' + (error.message || 'Неизвестная ошибка'), 'error');
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'C',location:'index.html:connectWallet',message:'Connect error',data:{error:String(error)},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
-            }
-        }
-        
-        async function handleWalletConnected(address) {
-            showStatus('Кошелек подключен! Регистрация...', 'info');
-            
-            try {
-                // Отправляем запрос на регистрацию
-                const response = await fetch(API_BASE + '/register-wallet', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        wallet_address: address
-                    })
-                });
-                
-                const data = await response.json();
-                
-                // #region agent log
-                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'D',location:'index.html:handleWalletConnected',message:'Register response',data:{status:response.status,ok:response.ok,body:data},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
-                if (response.ok && data.success) {
-                    showStatus(
-                        data.created 
-                            ? '✅ Регистрация успешна! Добро пожаловать!' 
-                            : '✅ Вы уже зарегистрированы!',
-                        'success'
-                    );
-                    document.getElementById('wallet-address').textContent = address;
-                    document.getElementById('wallet-info').classList.add('active');
+            }).catch(()=>{});
+
+            // Изменение статуса
+            tonConnectUI.onStatusChange((wallet) => {
+                const addr = wallet?.account?.address;
+                if (addr) {
+                    showAddress(addr);
+                    // #region agent log
+                    fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'B',location:'index.html:onStatusChange',message:'Wallet connected',data:{address:addr},timestamp:Date.now()})}).catch(()=>{});
+                    // #endregion
+                    // Регистрация на бэкенде
+                    registerWallet(addr);
                 } else {
-                    showStatus('Ошибка регистрации: ' + (data.error || 'Неизвестная ошибка'), 'error');
+                    hideAddress();
+                    showStatus('Кошелек отключен', 'info');
                 }
-            } catch (error) {
-                showStatus('Ошибка при отправке запроса: ' + error.message, 'error');
-                console.error('Registration error:', error);
+            });
+        }
+
+        async function registerWallet(address) {
+            try {
+                const resp = await fetch(API_BASE + '/register-wallet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wallet_address: address })
+                });
+                const data = await resp.json().catch(() => ({}));
+                // #region agent log
+                fetch('http://127.0.0.1:7242/ingest/abcfbc15-865b-40df-86e0-0fb459b48453',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'run1',hypothesisId:'D',location:'index.html:registerWallet',message:'Register response',data:{status:resp.status,ok:resp.ok,body:data},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
+                if (resp.ok && data.success) {
+                    showStatus(data.created ? '✅ Регистрация успешна!' : '✅ Уже зарегистрированы', 'success');
+                } else {
+                    showStatus('Ошибка регистрации: ' + (data.error || resp.status), 'error');
+                }
+            } catch (err) {
+                showStatus('Ошибка запроса: ' + err.message, 'error');
             }
         }
-        
-        function showStatus(message, type) {
-            const statusEl = document.getElementById('status');
-            statusEl.textContent = message;
-            statusEl.className = 'status ' + type;
-            statusEl.style.display = 'block';
-            
-            if (type === 'success' || type === 'error') {
-                setTimeout(() => {
-                    statusEl.style.display = 'none';
-                }, 5000);
-            }
-        }
+
+        window.addEventListener('load', initTONConnect);
     </script>
 </body>
 </html>

@@ -3,7 +3,7 @@ URL configuration for backend project.
 """
 from django.contrib import admin
 from django.urls import path, include
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, HttpResponseNotFound
 from django.views.decorators.http import require_http_methods
 import os
 import json
@@ -74,10 +74,39 @@ def tonconnect_manifest(request):
     except FileNotFoundError:
         return JsonResponse({'error': 'Manifest not found'}, status=404)
 
+# Отдача статического icon.svg (для manifest iconUrl)
+def static_file(request, filename):
+    static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', filename)
+    if not os.path.isfile(static_path):
+        return HttpResponseNotFound()
+    with open(static_path, 'rb') as f:
+        content = f.read()
+    if filename.endswith('.svg'):
+        content_type = 'image/svg+xml'
+    else:
+        content_type = 'application/octet-stream'
+    # #region agent log
+    try:
+        with open('/Users/dmitrijmitin/projects/.cursor/debug.log', 'a') as dbg:
+            dbg.write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "run1",
+                "hypothesisId": "H1",
+                "location": "backend/urls.py:static_file",
+                "message": "static served",
+                "data": {"filename": filename},
+                "timestamp": int(time.time() * 1000)
+            }) + "\n")
+    except Exception:
+        pass
+    # #endregion
+    return HttpResponse(content, content_type=content_type)
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/', include('api.urls')),
     path('tonconnect-manifest.json', tonconnect_manifest, name='tonconnect_manifest'),
+    path('static/<str:filename>', static_file, name='static_file'),
     path('', index_view, name='index'),
 ]
 
