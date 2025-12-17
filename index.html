@@ -147,40 +147,75 @@
         document.getElementById('api-url').textContent = API_BASE;
         
         let walletAddress = null;
+        let tonConnectUI = null;
         
-        // Инициализация TON Connect UI
-        const tonConnectUI = new TON_CONNECT_UI.TONConnectUI({
-            manifestUrl: window.location.origin + '/tonconnect-manifest.json',
-            language: 'ru'
-        });
-        
-        // Проверка существующего подключения
-        tonConnectUI.connectionRestored.then(() => {
-            const account = tonConnectUI.account;
-            if (account) {
-                walletAddress = account.address;
-                handleWalletConnected(walletAddress);
+        // Ждем загрузки DOM и библиотеки TON Connect
+        function initTONConnect() {
+            // Проверяем, что библиотека загружена
+            if (typeof TON_CONNECT_UI === 'undefined') {
+                console.error('TON Connect UI library not loaded');
+                showStatus('Ошибка: библиотека TON Connect не загружена', 'error');
+                return;
             }
-        });
-        
-        // Обработка подключения кошелька
-        tonConnectUI.onStatusChange((wallet) => {
-            if (wallet) {
-                walletAddress = wallet.account.address;
-                handleWalletConnected(walletAddress);
-            } else {
-                walletAddress = null;
-                document.getElementById('wallet-info').classList.remove('active');
-                showStatus('Кошелек отключен', 'info');
+            
+            try {
+                // Инициализация TON Connect UI
+                tonConnectUI = new TON_CONNECT_UI.TONConnectUI({
+                    manifestUrl: window.location.origin + '/tonconnect-manifest.json',
+                    language: 'ru'
+                });
+                
+                // Проверка существующего подключения
+                tonConnectUI.connectionRestored.then(() => {
+                    const account = tonConnectUI.account;
+                    if (account) {
+                        walletAddress = account.address;
+                        handleWalletConnected(walletAddress);
+                    }
+                }).catch(err => {
+                    console.log('No existing connection:', err);
+                });
+                
+                // Обработка подключения кошелька
+                tonConnectUI.onStatusChange((wallet) => {
+                    if (wallet) {
+                        walletAddress = wallet.account.address;
+                        handleWalletConnected(walletAddress);
+                    } else {
+                        walletAddress = null;
+                        document.getElementById('wallet-info').classList.remove('active');
+                        showStatus('Кошелек отключен', 'info');
+                    }
+                });
+            } catch (error) {
+                console.error('TON Connect initialization error:', error);
+                showStatus('Ошибка инициализации TON Connect: ' + error.message, 'error');
             }
-        });
+        }
+        
+        // Инициализация после загрузки DOM
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                // Даем время на загрузку скрипта TON Connect
+                setTimeout(initTONConnect, 100);
+            });
+        } else {
+            // DOM уже загружен
+            setTimeout(initTONConnect, 100);
+        }
         
         async function connectWallet() {
+            if (!tonConnectUI) {
+                showStatus('TON Connect не инициализирован. Пожалуйста, обновите страницу.', 'error');
+                return;
+            }
+            
             try {
                 showStatus('Подключение кошелька...', 'info');
                 await tonConnectUI.openModal();
             } catch (error) {
                 showStatus('Ошибка подключения: ' + error.message, 'error');
+                console.error('Connect error:', error);
             }
         }
         
@@ -223,6 +258,7 @@
             const statusEl = document.getElementById('status');
             statusEl.textContent = message;
             statusEl.className = 'status ' + type;
+            statusEl.style.display = 'block';
             
             if (type === 'success' || type === 'error') {
                 setTimeout(() => {
