@@ -9,6 +9,8 @@
 - **GET /api/v1/health** → `200` JSON: `{status:"ok", host, debug, time}`
 - **POST /api/v1/register-wallet** → JSON `{wallet_address}` → create/update в SQLite (wallet уникальный)
 - **GET /api/v1/me?wallet_address=...** → JSON пользователя
+- **GET /api/v1/ton-proof/payload** → выдать nonce (payload) для TonConnect `ton_proof` (кладётся в session)
+- **POST /api/v1/ton-proof/verify** → проверить `ton_proof` и создать server-side session (`ton_address`, `ton_public_key`)
 
 Все API endpoints помечены `@csrf_exempt`, чтобы POST работал без CSRF на старте.
 
@@ -25,6 +27,48 @@ python manage.py makemigrations
 python manage.py migrate
 
 python manage.py runserver 0.0.0.0:8000
+```
+
+## Frontend (React + TON Connect UI)
+
+Фронтенд лежит в `frontend/` (Vite + React + `@tonconnect/ui-react`).
+
+### Dev (2 терминала)
+
+Терминал 1 (Django):
+
+```bash
+python manage.py runserver 0.0.0.0:8000
+```
+
+Терминал 2 (Vite):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Открывай `http://127.0.0.1:5173` — Vite проксирует `/api/*` и `/tonconnect-manifest.json` на Django.
+
+### Prod-like (сборка и раздача через Django)
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+После сборки Django начнёт отдавать React на `GET /` (через Vite manifest + `/static/*`).
+
+### TON Proof domain
+
+По умолчанию домен для `ton_proof` берётся из `request.get_host()` (без порта).
+Для прод-окружения можно зафиксировать домен:
+
+```bash
+export TON_PROOF_DOMAIN=refnet.click
+export TON_PROOF_TTL_SECONDS=600
 ```
 
 ## Проверка (curl)

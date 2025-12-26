@@ -2,3 +2,7 @@ django>=4.2,<4.3
 gunicorn>=21.2.0
 python-dotenv>=1.0.0
 
+# TON Connect (ton_proof verification)
+PyNaCl>=1.6.0
+pytoniq-core>=0.1.46
+
