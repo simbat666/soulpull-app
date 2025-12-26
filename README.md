@@ -1,165 +1,71 @@
-# Soulpull Django Backend
+# Soulpull (minimal Django 4.2 backend)
 
-Django-бэкенд для проекта Soulpull с API v1 и интеграцией TON Connect.
+Минимальный “100% работает” Django 4.2 скелет под прод (gunicorn за nginx / cloudflare).
 
-## Быстрый старт
+## Endpoints
 
-1. Установите зависимости:
-```bash
-pip install -r requirements.txt
-```
+- **GET /** → HTML из `templates/index.html` (“Soulpull: server ok”)
+- **GET /tonconnect-manifest.json** → JSON из файла `tonconnect-manifest.json` (читается с диска)
+- **GET /api/v1/health** → `200` JSON: `{status:"ok", host, debug, time}`
+- **POST /api/v1/register-wallet** → JSON `{wallet_address}` → create/update в SQLite (wallet уникальный)
+- **GET /api/v1/me?wallet_address=...** → JSON пользователя
 
-2. Создайте `.env` файл (скопируйте из `.env.example` и заполните):
-```bash
-cp .env.example .env
-```
+Все API endpoints помечены `@csrf_exempt`, чтобы POST работал без CSRF на старте.
 
-3. Выполните миграции:
-```bash
-python manage.py makemigrations
-python manage.py migrate
-```
+## Локальный запуск
 
-4. Запустите сервер:
-```bash
-python manage.py runserver
-```
-
-5. Откройте в браузере: http://localhost:8000
-
-## TON Connect
-
-На главной странице доступна интеграция с TON Connect. При подключении кошелька происходит автоматическая регистрация пользователя через endpoint `/api/v1/register-wallet`.
-
-## Установка
-
-1. Создайте виртуальное окружение:
 ```bash
 python -m venv venv
-source venv/bin/activate  # для Linux/Mac
-# или
-venv\Scripts\activate  # для Windows
-```
-
-2. Установите зависимости:
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
-```
 
-3. Создайте файл `.env` на основе `.env.example`:
-```bash
-# Скопируйте .env.example в .env и заполните значения
 cp .env.example .env
-```
 
-4. Выполните миграции:
-```bash
 python manage.py makemigrations
 python manage.py migrate
+
+python manage.py runserver 0.0.0.0:8000
 ```
 
-5. Создайте суперпользователя (опционально):
-```bash
-python manage.py createsuperuser
-```
+## Проверка (curl)
 
-6. Запустите сервер разработки:
-```bash
-python manage.py runserver
-```
-
-## Структура проекта
-
-- `backend/` - основной проект Django
-- `api/` - приложение с моделями и API endpoints
-- `manage.py` - скрипт управления Django
-
-## API Endpoints
-
-Все endpoints доступны по префиксу `/api/v1/`:
-
-### Пользовательские endpoints:
-
-- `POST /api/v1/register` - регистрация пользователя
-- `POST /api/v1/wallet` - привязка кошелька
-- `POST /api/v1/intent` - создание намерения участия
-- `GET /api/v1/me?telegram_id=<id>` - информация о пользователе
-- `POST /api/v1/payout` - создание запроса на выплату
-- `POST /api/v1/confirm` - подтверждение транзакции
-- `GET /api/v1/jetton/wallet?telegram_id=<id>` - адрес jetton кошелька (заглушка)
-
-### Админские endpoints (требуют заголовок `X-Admin-Token`):
-
-- `POST /api/v1/payout/mark` - изменение статуса выплаты
-
-## Модели
-
-- `UserProfile` - профиль пользователя (telegram_id уникальный)
-- `AuthorCode` - коды автора для регистрации
-- `Participation` - участие пользователя (tx_hash уникальный)
-- `PayoutRequest` - запросы на выплату
-- `RiskEvent` - события риска
-
-## Переменные окружения
-
-Создайте файл `.env` со следующими переменными:
-
-```
-DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
-SECRET_KEY=your-secret-key-here
-X_ADMIN_TOKEN=your-admin-token-here
-RECEIVER_WALLET=your-receiver-wallet-address
-USDT_JETTON_MASTER=your-usdt-jetton-master-address
-TONCENTER_API_KEY=your-toncenter-api-key
-```
-
-## Запуск с Gunicorn
-
-Для production используйте Gunicorn:
+### Локально
 
 ```bash
-gunicorn backend.wsgi:application --bind 0.0.0.0:8000
+curl -i http://127.0.0.1:8000/
+curl -i http://127.0.0.1:8000/tonconnect-manifest.json
+curl -i http://127.0.0.1:8000/api/v1/health
+
+curl -i -X POST http://127.0.0.1:8000/api/v1/register-wallet \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_address":"EQC_TEST_WALLET"}'
+
+curl -i "http://127.0.0.1:8000/api/v1/me?wallet_address=EQC_TEST_WALLET"
 ```
 
-## Диагностика проблем
+### По домену
 
-### Сайт не отвечает (ERR_TIMED_OUT)
-
-Если сайт не загружается, выполните на сервере:
-
-1. **Проверка статуса:**
 ```bash
-./check-server.sh
+curl -i https://refnet.click/
+curl -i https://refnet.click/tonconnect-manifest.json
+curl -i https://refnet.click/api/v1/health
+
+curl -i -X POST https://refnet.click/api/v1/register-wallet \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_address":"EQC_TEST_WALLET"}'
+
+curl -i "https://refnet.click/api/v1/me?wallet_address=EQC_TEST_WALLET"
 ```
 
-2. **Исправление проблем:**
+## Прод (gunicorn)
+
+Пример:
+
 ```bash
-./fix-server.sh
+gunicorn backend.wsgi:application --bind 127.0.0.1:8000 --workers 2 --timeout 30
 ```
 
-3. **Ручная проверка:**
-```bash
-# Проверка сервиса
-sudo systemctl status soulpull-backend
-
-# Проверка nginx
-sudo systemctl status nginx
-
-# Просмотр логов
-sudo journalctl -u soulpull-backend -n 50
-sudo tail -f /var/log/nginx/error.log
-
-# Перезапуск вручную
-sudo systemctl restart soulpull-backend
-sudo systemctl reload nginx
-```
-
-### TON Connect не работает
-
-1. Проверьте, что манифест доступен: `https://your-domain.com/tonconnect-manifest.json`
-2. Проверьте консоль браузера (F12) на наличие ошибок
-3. Убедитесь, что используется HTTPS (TON Connect требует HTTPS)
-
+Nginx/Cloudflare должны прокидывать `X-Forwarded-Proto: https` — в `backend/settings.py` включено:
+`SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO','https')` и `USE_X_FORWARDED_HOST = True`.
 
 
