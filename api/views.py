@@ -9,9 +9,20 @@ from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
-from pytoniq_core import Cell
-from nacl.exceptions import BadSignatureError
-from nacl.signing import VerifyKey
+
+# Optional deps for ton_proof verification.
+# IMPORTANT: keep imports optional so the whole site doesn't 500 if deps are missing in prod.
+try:
+    from pytoniq_core import Cell  # type: ignore
+except Exception:  # pragma: no cover
+    Cell = None  # type: ignore[assignment]
+
+try:
+    from nacl.exceptions import BadSignatureError  # type: ignore
+    from nacl.signing import VerifyKey  # type: ignore
+except Exception:  # pragma: no cover
+    BadSignatureError = None  # type: ignore[assignment]
+    VerifyKey = None  # type: ignore[assignment]
 
 from .models import UserProfile
 
@@ -244,8 +255,17 @@ def ton_proof_verify(request):
     if abs(now - timestamp) > ttl:
         return JsonResponse({"ok": False, "error": "proof timestamp expired"}, status=400)
 
+    if VerifyKey is None or BadSignatureError is None:
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "server is missing dependencies for ton_proof verification (PyNaCl)",
+            },
+            status=500,
+        )
+
     # Optional: verify walletStateInit hash equals address hash (recommended by spec)
-    if wallet_state_init_b64:
+    if wallet_state_init_b64 and Cell is not None:
         try:
             wc, addr_hash = _parse_hex_address(address)
             _ = wc  # used only for parsing validation
