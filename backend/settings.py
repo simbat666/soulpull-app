@@ -103,10 +103,3 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-# TON Connect (ton_proof)
-# If empty, backend uses request host without port.
-TON_PROOF_DOMAIN = os.getenv("TON_PROOF_DOMAIN", "")
-TON_PROOF_TTL_SECONDS = int(os.getenv("TON_PROOF_TTL_SECONDS", "600"))
-
-
