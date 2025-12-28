@@ -331,3 +331,28 @@ def ton_proof_verify(request):
     return JsonResponse({"ok": True, "address": address})
 
 
+@csrf_exempt
+@require_http_methods(["GET"])
+def session_info(request):
+    """
+    Returns current server-side TON session info (if verified).
+    Useful for web-apps that serve the UI statically via nginx and use Django only as an API.
+    """
+    ton_address = request.session.get("ton_address")
+    ton_public_key = request.session.get("ton_public_key")
+    ton_verified_at = request.session.get("ton_verified_at")
+
+    if not ton_address:
+        return JsonResponse({"ok": True, "authenticated": False})
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "authenticated": True,
+            "address": ton_address,
+            "publicKey": ton_public_key,
+            "verifiedAt": ton_verified_at,
+        }
+    )
+
+

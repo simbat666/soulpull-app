@@ -34,7 +34,9 @@
   async function verifyTonProof(wallet) {
     const proofItem = wallet?.connectItems?.tonProof;
     if (!proofItem || !('proof' in proofItem)) {
-      throw new Error('ton_proof отсутствует (кошелёк не прислал proof)');
+      // It's normal on some wallets/restore flows that ton_proof is present only in initial connect event.
+      // In that case we should not hard-fail; backend session may already be established.
+      return null;
     }
 
     const req = {
@@ -57,6 +59,12 @@
     return data;
   }
 
+  async function fetchSession() {
+    const res = await fetch('/api/v1/session', { method: 'GET', credentials: 'include' });
+    if (!res.ok) throw new Error(`session request failed: ${res.status}`);
+    return res.json();
+  }
+
   async function main() {
     clearError();
     setStatus('init');
@@ -70,6 +78,19 @@
       manifestUrl: '/tonconnect-manifest.json',
       widgetRootId: 'tc-widget-root',
     });
+
+    // If backend already has a verified session, show it immediately.
+    try {
+      const s = await fetchSession();
+      if (s && s.authenticated) {
+        walletEl.textContent = s.address || '—';
+        pubkeyEl.textContent = s.publicKey || '—';
+        setStatus('ok');
+        hintEl.textContent = 'OK: сессия уже подтверждена на сервере.';
+      }
+    } catch (_) {
+      // ignore
+    }
 
     setStatus('loading payload');
     tc.setConnectRequestParameters({ state: 'loading' });
@@ -103,9 +124,20 @@
       try {
         setStatus('verifying');
         hintEl.innerHTML = 'Проверяем <code>ton_proof</code> на бэкенде…';
-        await verifyTonProof(wallet);
-        setStatus('ok');
-        hintEl.textContent = 'OK: ton_proof валиден, сессия создана на сервере.';
+        const verified = await verifyTonProof(wallet);
+        if (verified) {
+          setStatus('ok');
+          hintEl.textContent = 'OK: ton_proof валиден, сессия создана на сервере.';
+        } else {
+          const s = await fetchSession();
+          if (s && s.authenticated) {
+            setStatus('ok');
+            hintEl.textContent = 'OK: сессия подтверждена на сервере.';
+          } else {
+            setStatus('ready');
+            hintEl.textContent = 'Кошелёк подключён. Для верификации нужен ton_proof (переподключи кошелёк).';
+          }
+        }
       } catch (e) {
         setStatus('error');
         showError(e instanceof Error ? e.message : 'verify error');
