@@ -20,7 +20,7 @@ def index(request):
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Soulpull</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/app.css?v=ui-20251228-1" />
   </head>
   <body class="app" data-screen="connect">
     <div class="bg">
