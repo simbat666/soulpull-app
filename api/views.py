@@ -6,6 +6,8 @@ import struct
 
 from django.conf import settings
 from django.http import JsonResponse
+from django.template import TemplateDoesNotExist
+from django.template.loader import get_template
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -100,12 +102,25 @@ def _ton_proof_ttl_seconds() -> int:
 @csrf_exempt
 @require_http_methods(["GET"])
 def health(request):
+    probe_index = (request.GET.get("probe_index") or "").strip() in {"1", "true", "yes"}
+    index_probe = None
+    if probe_index:
+        try:
+            tpl = get_template("index.html")
+            _ = tpl.render({}, request)
+            index_probe = {"ok": True}
+        except TemplateDoesNotExist:
+            index_probe = {"ok": False, "error": "TemplateDoesNotExist"}
+        except Exception as e:
+            index_probe = {"ok": False, "error": e.__class__.__name__}
+
     return JsonResponse(
         {
             "status": "ok",
             "host": request.get_host(),
             "debug": bool(settings.DEBUG),
             "time": timezone.now().isoformat(),
+            **({"index": index_probe} if index_probe is not None else {}),
         }
     )
 
