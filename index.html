@@ -13,16 +13,74 @@
     </header>
 
     <main class="main">
-      <h1>TON Connect</h1>
-      <div class="card">
-        <div class="row"><div class="label">Статус</div><div class="value" id="status">init</div></div>
-        <div class="row"><div class="label">Адрес</div><div class="value mono" id="wallet-address"></div></div>
+      <div id="tg-warning" class="notice hidden">
+        Откройте через Telegram WebApp, чтобы привязать Telegram.
       </div>
+
+      <section id="screen-connect" class="screen">
+        <h1>Подключите кошелёк</h1>
+        <p class="muted">Кошелёк = аккаунт. Авторизация происходит через TON Proof.</p>
+      </section>
+
+      <section id="screen-onboarding" class="screen hidden">
+        <h1>Онбординг</h1>
+        <div class="card">
+          <div class="row"><div class="label">Статус</div><div class="value" id="status">init</div></div>
+          <div class="row"><div class="label">Wallet</div><div class="value mono" id="wallet-address"></div></div>
+          <div class="row"><div class="label">Telegram</div><div class="value" id="telegram-info">—</div></div>
+          <div class="row"><div class="label">Inviter</div><div class="value" id="inviter-info">—</div></div>
+          <div class="row"><div class="label">Author code</div><div class="value" id="author-code-info">—</div></div>
+        </div>
+
+        <div class="card">
+          <h2>Привязать Telegram</h2>
+          <button id="btn-telegram-verify" class="btn btn-indigo">Привязать</button>
+        </div>
+
+        <div class="card">
+          <h2>Кто пригласил</h2>
+          <div class="field">
+            <input id="inviter-input" class="input" placeholder="telegram_id / wallet / @username" />
+            <button id="btn-inviter-apply" class="btn">Сохранить</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Код автора</h2>
+          <div class="field">
+            <input id="author-code-input" class="input" placeholder="Введите код" />
+            <button id="btn-author-code-apply" class="btn">Применить</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Билет</h2>
+          <button id="btn-pay-create" class="btn btn-indigo">Оплатить билет</button>
+          <div id="payment-info" class="muted mt"></div>
+          <button id="btn-pay-send" class="btn mt hidden">Отправить через кошелёк</button>
+          <div class="field mt">
+            <input id="tx-hash-input" class="input" placeholder="Tx hash (для MVP)" />
+            <button id="btn-pay-confirm" class="btn">Подтвердить</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-cabinet" class="screen hidden">
+        <h1>Кабинет</h1>
+        <div class="card">
+          <div class="row"><div class="label">Wallet</div><div class="value mono" id="cab-wallet">—</div></div>
+          <div class="row"><div class="label">Telegram</div><div class="value" id="cab-telegram">—</div></div>
+          <div class="row"><div class="label">Inviter</div><div class="value" id="cab-inviter">—</div></div>
+          <div class="row"><div class="label">Author code</div><div class="value" id="cab-author-code">—</div></div>
+          <div class="row"><div class="label">Status</div><div class="value" id="cab-status">—</div></div>
+          <div class="row"><div class="label">Stats</div><div class="value" id="cab-stats">—</div></div>
+        </div>
+      </section>
     </main>
 
     <!-- TonConnect UI (browser build, no bundler) -->
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/js/app.js?v=20251228-3"></script>
+    <script src="/static/js/app.js?v=20251228-4"></script>
   </body>
 </html>
 

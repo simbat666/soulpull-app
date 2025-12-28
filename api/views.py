@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import os
 import secrets
 import struct
 import logging
@@ -16,7 +17,10 @@ from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 
 from .auth_tokens import issue_token, parse_bearer_token, verify_token
-from .models import TonProofPayload, UserProfile
+from .models import EventLog, EventType, ParticipationStatus, TonProofPayload, UserProfile
+from .services.auth import require_user_or_401
+from .services.payments import confirm_payment, create_payment_intent
+from .services.telegram import verify_init_data
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +238,11 @@ def tonproof_verify(request):
         user.save(update_fields=["updated_at"])
 
         token = issue_token(secret=_auth_secret(), wallet_address=wallet_address, ttl_seconds=_auth_ttl_seconds())
+        EventLog.objects.create(
+            user=user,
+            event_type=EventType.LOGIN,
+            payload={"wallet_address": wallet_address},
+        )
         return JsonResponse({"token": token})
     except Exception as e:
         # Never return HTML 500 to frontend; keep it JSON so UI can surface the failure.
@@ -256,9 +265,199 @@ def me(request):
     return JsonResponse(
         {
             "wallet_address": obj.wallet_address,
+            "telegram": (
+                {
+                    "id": obj.telegram_id,
+                    "username": obj.telegram_username,
+                    "first_name": obj.telegram_first_name,
+                }
+                if obj.telegram_id
+                else None
+            ),
+            "inviter": {
+                "wallet_address": obj.inviter_wallet_address,
+                "telegram_id": obj.inviter_telegram_id,
+                "set_at": obj.inviter_set_at.isoformat() if obj.inviter_set_at else None,
+            },
+            "author_code": obj.author_code,
+            "participation_status": obj.participation_status,
+            "stats": {
+                "invited_count": obj.invited_count,
+                "paid_count": obj.paid_count,
+                "payouts_count": obj.payouts_count,
+                "points": obj.points,
+            },
             "created_at": obj.created_at.isoformat(),
             "updated_at": obj.updated_at.isoformat(),
         }
     )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def telegram_verify(request):
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    init_data = (body.get("initData") or "").strip()
+    if not init_data:
+        return JsonResponse({"error": "initData is required"}, status=400)
+
+    bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    if not bot_token:
+        return JsonResponse({"error": "server missing TELEGRAM_BOT_TOKEN"}, status=500)
+
+    try:
+        tg_user = verify_init_data(init_data, bot_token)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    user.telegram_id = tg_user.telegram_id
+    user.telegram_username = tg_user.username
+    user.telegram_first_name = tg_user.first_name
+    user.save(update_fields=["telegram_id", "telegram_username", "telegram_first_name", "updated_at"])
+
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.TELEGRAM_VERIFY,
+        payload={"telegram_id": tg_user.telegram_id, "username": tg_user.username},
+    )
+    return JsonResponse({"ok": True})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def inviter_apply(request):
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    if user.participation_status not in {ParticipationStatus.NEW, ParticipationStatus.PENDING}:
+        return JsonResponse({"error": "inviter can not be changed after activation"}, status=400)
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    inviter = (body.get("inviter") or "").strip()
+    if not inviter:
+        return JsonResponse({"error": "inviter is required"}, status=400)
+
+    inviter_wallet = None
+    inviter_tg = None
+    if inviter.isdigit():
+        inviter_tg = int(inviter)
+    elif ":" in inviter:
+        inviter_wallet = inviter
+    else:
+        # allow passing @username as MVP "raw" in wallet field for later resolution
+        inviter_wallet = inviter
+
+    user.inviter_wallet_address = inviter_wallet
+    user.inviter_telegram_id = inviter_tg
+    user.inviter_set_at = timezone.now()
+    user.save(update_fields=["inviter_wallet_address", "inviter_telegram_id", "inviter_set_at", "updated_at"])
+
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.INVITER_SET,
+        payload={"inviter": inviter},
+    )
+    return JsonResponse({"ok": True})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def author_code_apply(request):
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    if user.author_code:
+        return JsonResponse({"error": "author_code already applied"}, status=400)
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    code = (body.get("code") or "").strip()
+    if not code:
+        return JsonResponse({"error": "code is required"}, status=400)
+
+    user.author_code = code
+    user.author_code_applied_at = timezone.now()
+    user.save(update_fields=["author_code", "author_code_applied_at", "updated_at"])
+
+    EventLog.objects.create(user=user, event_type=EventType.APPLY_CODE, payload={"code": code})
+    return JsonResponse({"ok": True})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payments_create(request):
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    try:
+        intent = create_payment_intent(user)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.PAYMENT_CREATE,
+        payload={"comment": intent.comment, "amount_nanotons": intent.amount_nanotons},
+    )
+
+    return JsonResponse(
+        {
+            "amount": intent.amount_nanotons,
+            "amount_usd_cents": intent.amount_usd_cents,
+            "receiver": intent.receiver,
+            "comment": intent.comment,
+            "valid_until": intent.valid_until,
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payments_confirm(request):
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    tx_hash = (body.get("tx_hash") or "").strip()
+    try:
+        payment = confirm_payment(user, tx_hash)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.PAYMENT_CONFIRM,
+        payload={"tx_hash": tx_hash, "payment_id": payment.id, "status": payment.status},
+    )
+
+    return JsonResponse({"ok": True, "status": payment.status})
 
 

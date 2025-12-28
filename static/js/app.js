@@ -1,16 +1,76 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
+  const INVITER_KEY = 'soulpull_pending_inviter';
 
-  const statusEl = document.getElementById('status');
-  const addrEl = document.getElementById('wallet-address');
+  const el = (id) => document.getElementById(id);
+  const statusEl = el('status');
+  const addrEl = el('wallet-address');
+
+  const tgWarningEl = el('tg-warning');
+
+  const screenConnect = el('screen-connect');
+  const screenOnboarding = el('screen-onboarding');
+  const screenCabinet = el('screen-cabinet');
+
+  const telegramInfoEl = el('telegram-info');
+  const inviterInfoEl = el('inviter-info');
+  const authorCodeInfoEl = el('author-code-info');
+
+  const cabWalletEl = el('cab-wallet');
+  const cabTelegramEl = el('cab-telegram');
+  const cabInviterEl = el('cab-inviter');
+  const cabAuthorCodeEl = el('cab-author-code');
+  const cabStatusEl = el('cab-status');
+  const cabStatsEl = el('cab-stats');
+
+  const btnTelegramVerify = el('btn-telegram-verify');
+  const inviterInput = el('inviter-input');
+  const btnInviterApply = el('btn-inviter-apply');
+  const authorCodeInput = el('author-code-input');
+  const btnAuthorCodeApply = el('btn-author-code-apply');
+
+  const btnPayCreate = el('btn-pay-create');
+  const btnPaySend = el('btn-pay-send');
+  const paymentInfo = el('payment-info');
+  const txHashInput = el('tx-hash-input');
+  const btnPayConfirm = el('btn-pay-confirm');
 
   function setStatus(text) {
-    statusEl.textContent = text;
+    if (statusEl) statusEl.textContent = text;
   }
 
   function setAddress(text) {
-    addrEl.textContent = text || '';
+    if (addrEl) addrEl.textContent = text || '';
+  }
+
+  function show(elm) {
+    if (!elm) return;
+    elm.classList.remove('hidden');
+  }
+
+  function hide(elm) {
+    if (!elm) return;
+    elm.classList.add('hidden');
+  }
+
+  function showScreen(which) {
+    // which: 'connect' | 'onboarding' | 'cabinet'
+    if (which === 'connect') {
+      show(screenConnect);
+      hide(screenOnboarding);
+      hide(screenCabinet);
+      return;
+    }
+    if (which === 'onboarding') {
+      hide(screenConnect);
+      show(screenOnboarding);
+      hide(screenCabinet);
+      return;
+    }
+    hide(screenConnect);
+    hide(screenOnboarding);
+    show(screenCabinet);
   }
 
   async function registerWallet(address) {
@@ -68,6 +128,17 @@
     return data;
   }
 
+  async function postWithBearer(path, token, body) {
+    const res = await fetch(API_BASE + path, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || `${path} failed: ${res.status}`);
+    return data;
+  }
+
   function getTonConnectCtor() {
     const ns = window.TON_CONNECT_UI;
     return ns?.TonConnectUI || ns?.TONConnectUI;
@@ -80,8 +151,28 @@
       return;
     }
 
+    // Telegram environment hint
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    if (!tg || !tg.initData) {
+      show(tgWarningEl);
+      if (btnTelegramVerify) btnTelegramVerify.disabled = true;
+    } else {
+      hide(tgWarningEl);
+      if (btnTelegramVerify) btnTelegramVerify.disabled = false;
+    }
+
+    // capture ?ref=... once
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const ref = (params.get('ref') || '').trim();
+      if (ref) localStorage.setItem(INVITER_KEY, ref);
+    } catch (_) {
+      // ignore
+    }
+
     setStatus('init');
     setAddress('');
+    showScreen('connect');
 
     const tonConnectUI = new TonConnectUI({
       manifestUrl: window.location.origin + '/tonconnect-manifest.json',
@@ -89,18 +180,76 @@
     });
 
     let isLoggedIn = false;
+    let currentToken = null;
+    let currentProfile = null;
+    let lastPaymentIntent = null;
 
     async function refreshMeFromToken() {
       const savedToken = localStorage.getItem(TOKEN_KEY);
       if (!savedToken) return;
       try {
         const u = await me(savedToken);
-        setAddress(u?.wallet_address || '');
-        setStatus('logged in');
+        currentToken = savedToken;
+        currentProfile = u;
+        renderProfile(u);
         isLoggedIn = true;
       } catch (_) {
         localStorage.removeItem(TOKEN_KEY);
+        currentToken = null;
+        currentProfile = null;
         isLoggedIn = false;
+      }
+    }
+
+    function renderProfile(u) {
+      if (!u) return;
+      const wa = u.wallet_address || '';
+      setAddress(wa);
+      if (telegramInfoEl) {
+        telegramInfoEl.textContent = u.telegram?.username
+          ? `@${u.telegram.username} (${u.telegram.id})`
+          : u.telegram?.id
+          ? String(u.telegram.id)
+          : '—';
+      }
+      if (inviterInfoEl) {
+        inviterInfoEl.textContent = u.inviter?.wallet_address || (u.inviter?.telegram_id ? String(u.inviter.telegram_id) : '—');
+      }
+      if (authorCodeInfoEl) authorCodeInfoEl.textContent = u.author_code || '—';
+
+      const status = u.participation_status || 'NEW';
+
+      if (cabWalletEl) cabWalletEl.textContent = wa || '—';
+      if (cabTelegramEl) cabTelegramEl.textContent = telegramInfoEl ? telegramInfoEl.textContent : '—';
+      if (cabInviterEl) cabInviterEl.textContent = inviterInfoEl ? inviterInfoEl.textContent : '—';
+      if (cabAuthorCodeEl) cabAuthorCodeEl.textContent = u.author_code || '—';
+      if (cabStatusEl) cabStatusEl.textContent = status;
+      if (cabStatsEl) {
+        const s = u.stats || {};
+        cabStatsEl.textContent = `invited=${s.invited_count || 0}, paid=${s.paid_count || 0}, payouts=${s.payouts_count || 0}, points=${s.points || 0}`;
+      }
+
+      if (status === 'ACTIVE') {
+        showScreen('cabinet');
+        setStatus('logged in');
+      } else {
+        showScreen('onboarding');
+        setStatus('logged in');
+      }
+    }
+
+    async function applyPendingInviterIfAny() {
+      if (!currentToken || !currentProfile) return;
+      if (currentProfile.inviter?.set_at) return;
+      const pending = localStorage.getItem(INVITER_KEY);
+      if (!pending) return;
+      try {
+        await postWithBearer('/inviter/apply', currentToken, { inviter: pending });
+        const u = await me(currentToken);
+        currentProfile = u;
+        renderProfile(u);
+      } catch (_) {
+        // ignore
       }
     }
 
@@ -124,6 +273,7 @@
     refreshMeFromToken().finally(() => {
       // 2) Always prepare tonProof for the next connect attempt (fresh payload, 5m TTL).
       prepareTonProof();
+      applyPendingInviterIfAny();
     });
 
     tonConnectUI.onStatusChange(async (wallet) => {
@@ -132,11 +282,13 @@
         if (!address) {
           setAddress('');
           setStatus('wallet disconnected');
+          showScreen('connect');
           return;
         }
 
         setAddress(address);
         setStatus('wallet connected');
+        showScreen('onboarding');
 
         // Register wallet (legacy behavior, still required)
         try {
@@ -172,15 +324,124 @@
           proof,
         });
         localStorage.setItem(TOKEN_KEY, token);
+        currentToken = token;
 
         const u = await me(token);
-        setAddress(u?.wallet_address || address);
-        setStatus('logged in');
+        currentProfile = u;
+        renderProfile(u);
         isLoggedIn = true;
       } catch (e) {
         setStatus(`Ошибка: ${e instanceof Error ? e.message : 'unknown error'}`);
       }
     });
+
+    // UI actions
+    if (btnTelegramVerify) {
+      btnTelegramVerify.addEventListener('click', async () => {
+        if (!currentToken) return setStatus('Ошибка: нет токена');
+        const tg2 = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+        if (!tg2 || !tg2.initData) return setStatus('Ошибка: откройте через Telegram');
+        setStatus('telegram verify…');
+        try {
+          await postWithBearer('/telegram/verify', currentToken, { initData: tg2.initData });
+          const u = await me(currentToken);
+          currentProfile = u;
+          renderProfile(u);
+          setStatus('telegram linked');
+        } catch (e) {
+          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'telegram verify error'}`);
+        }
+      });
+    }
+
+    if (btnInviterApply) {
+      btnInviterApply.addEventListener('click', async () => {
+        if (!currentToken) return setStatus('Ошибка: нет токена');
+        const v = (inviterInput?.value || '').trim();
+        if (!v) return setStatus('Ошибка: inviter пустой');
+        setStatus('saving inviter…');
+        try {
+          await postWithBearer('/inviter/apply', currentToken, { inviter: v });
+          localStorage.removeItem(INVITER_KEY);
+          const u = await me(currentToken);
+          currentProfile = u;
+          renderProfile(u);
+          setStatus('inviter saved');
+        } catch (e) {
+          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'inviter error'}`);
+        }
+      });
+    }
+
+    if (btnAuthorCodeApply) {
+      btnAuthorCodeApply.addEventListener('click', async () => {
+        if (!currentToken) return setStatus('Ошибка: нет токена');
+        const v = (authorCodeInput?.value || '').trim();
+        if (!v) return setStatus('Ошибка: code пустой');
+        setStatus('applying author code…');
+        try {
+          await postWithBearer('/author-code/apply', currentToken, { code: v });
+          const u = await me(currentToken);
+          currentProfile = u;
+          renderProfile(u);
+          setStatus('author code applied');
+        } catch (e) {
+          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'author code error'}`);
+        }
+      });
+    }
+
+    if (btnPayCreate) {
+      btnPayCreate.addEventListener('click', async () => {
+        if (!currentToken) return setStatus('Ошибка: нет токена');
+        setStatus('creating payment…');
+        try {
+          lastPaymentIntent = await postWithBearer('/payments/create', currentToken, {});
+          if (paymentInfo) {
+            const ton = Number(lastPaymentIntent.amount || '0') / 1e9;
+            paymentInfo.textContent = `receiver: ${lastPaymentIntent.receiver}, amount: ${ton} TON, valid_until: ${lastPaymentIntent.valid_until}, comment: ${lastPaymentIntent.comment}`;
+          }
+          if (btnPaySend) show(btnPaySend);
+          setStatus('payment created');
+        } catch (e) {
+          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'payment create error'}`);
+        }
+      });
+    }
+
+    if (btnPaySend) {
+      btnPaySend.addEventListener('click', async () => {
+        if (!lastPaymentIntent) return setStatus('Ошибка: сначала создайте платёж');
+        try {
+          setStatus('opening wallet…');
+          await tonConnectUI.sendTransaction({
+            validUntil: lastPaymentIntent.valid_until,
+            messages: [{ address: lastPaymentIntent.receiver, amount: String(lastPaymentIntent.amount) }],
+          });
+          setStatus('tx sent. paste tx hash below');
+        } catch (e) {
+          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'send tx error'}`);
+        }
+      });
+    }
+
+    if (btnPayConfirm) {
+      btnPayConfirm.addEventListener('click', async () => {
+        if (!currentToken) return setStatus('Ошибка: нет токена');
+        const tx = (txHashInput?.value || '').trim();
+        if (!tx) return setStatus('Ошибка: tx_hash пустой');
+        setStatus('confirming payment…');
+        try {
+          await postWithBearer('/payments/confirm', currentToken, { tx_hash: tx });
+          const u = await me(currentToken);
+          currentProfile = u;
+          renderProfile(u);
+          setStatus('payment pending review');
+        } catch (e) {
+          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'payment confirm error'}`);
+        }
+      });
+    }
   }
 
   window.addEventListener('DOMContentLoaded', init);
