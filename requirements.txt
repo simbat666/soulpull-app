@@ -2,3 +2,6 @@ django>=4.2,<4.3
 gunicorn>=21.2.0
 python-dotenv>=1.0.0
 
+# Ed25519 verification for TON Proof
+PyNaCl>=1.6.0
+
