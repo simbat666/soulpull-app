@@ -18,8 +18,3 @@ staticfiles/
 .idea/
 .vscode/
 
-# Frontend (Vite/React)
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-

@@ -4,24 +4,28 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Soulpull</title>
-    {% if vite %}
-      {% for href in vite.css %}
-        <link rel="stylesheet" href="{{ href }}" />
-      {% endfor %}
-      <script type="module" src="{{ vite.js }}"></script>
-    {% else %}
-      <style>
-        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 40px; }
-        .ok { display: inline-block; padding: 10px 14px; border-radius: 10px; background: #e7f6ea; color: #145a1f; font-weight: 600; }
-      </style>
-    {% endif %}
+    <link rel="stylesheet" href="/static/app.css" />
   </head>
   <body>
-    {% if vite %}
-      <div id="root"></div>
-    {% else %}
-      <div class="ok">Soulpull: server ok (frontend not built yet)</div>
-    {% endif %}
+    <header class="header">
+      <div class="brand">Soulpull</div>
+      <div id="tc-widget-root"></div>
+    </header>
+
+    <main class="main">
+      <h1>TON Connect</h1>
+      <div class="card">
+        <div class="row"><div class="label">Status</div><div class="value" id="status">init</div></div>
+        <div class="row"><div class="label">Wallet</div><div class="value mono" id="wallet">—</div></div>
+        <div class="row"><div class="label">Public key</div><div class="value mono" id="pubkey">—</div></div>
+        <div class="hint" id="hint">Нажми “Connect Wallet”, затем мы проверим <code>ton_proof</code> на бэкенде.</div>
+        <div class="error mono" id="error" style="display:none"></div>
+      </div>
+    </main>
+
+    <!-- TonConnect UI (browser build, no bundler) -->
+    <script src="https://unpkg.com/@tonconnect/ui@2.3.1/dist/tonconnect-ui.min.js"></script>
+    <script src="/static/app.js"></script>
   </body>
 </html>
 

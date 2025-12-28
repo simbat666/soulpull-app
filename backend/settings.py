@@ -102,9 +102,6 @@ USE_TZ = True
 # STATIC
 STATIC_URL = "/static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-_frontend_dist = BASE_DIR / "frontend" / "dist"
-if _frontend_dist.exists():
-    STATICFILES_DIRS.append(_frontend_dist)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # TON Connect (ton_proof)

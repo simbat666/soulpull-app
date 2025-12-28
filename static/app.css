@@ -1,7 +1,9 @@
-.page {
-  min-height: 100vh;
+html, body {
+  margin: 0;
+  padding: 0;
   background: #0b0e14;
   color: #e9eefc;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 
 .header {
@@ -42,6 +44,7 @@
   padding: 8px 0;
   border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
 }
+
 .row:last-child {
   border-bottom: none;
 }
@@ -57,14 +60,13 @@
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
 }
 
 .hint {
   margin-top: 12px;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 .error {
@@ -76,3 +78,5 @@
   color: #ffd2d2;
   white-space: pre-wrap;
 }
+
+

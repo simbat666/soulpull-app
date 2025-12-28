@@ -29,37 +29,10 @@ python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
 ```
 
-## Frontend (React + TON Connect UI)
+## Frontend (web-app стандарт: Django template + static)
 
-Фронтенд лежит в `frontend/` (Vite + React + `@tonconnect/ui-react`).
-
-### Dev (2 терминала)
-
-Терминал 1 (Django):
-
-```bash
-python manage.py runserver 0.0.0.0:8000
-```
-
-Терминал 2 (Vite):
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Открывай `http://127.0.0.1:5173` — Vite проксирует `/api/*` и `/tonconnect-manifest.json` на Django.
-
-### Prod-like (сборка и раздача через Django)
-
-```bash
-cd frontend
-npm install
-npm run build
-```
-
-После сборки Django начнёт отдавать React на `GET /` (через Vite manifest + `/static/*`).
+UI находится в `templates/index.html` и статике `static/app.js` + `static/app.css`.
+TonConnect UI подключается **без сборщиков** через browser-bundle.
 
 ### TON Proof domain
 
