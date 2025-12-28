@@ -25,20 +25,17 @@ def index(request):
   <body>
     <header class="header">
       <div class="brand">Soulpull</div>
-      <div id="tc-widget-root"></div>
+      <div id="tonconnect"></div>
     </header>
     <main class="main">
       <h1>TON Connect</h1>
       <div class="card">
-        <div class="row"><div class="label">Status</div><div class="value" id="status">init</div></div>
-        <div class="row"><div class="label">Wallet</div><div class="value mono" id="wallet">—</div></div>
-        <div class="row"><div class="label">Public key</div><div class="value mono" id="pubkey">—</div></div>
-        <div class="hint" id="hint">Нажми “Connect Wallet”, затем мы проверим <code>ton_proof</code> на бэкенде.</div>
-        <div class="error mono" id="error" style="display:none"></div>
+        <div class="row"><div class="label">Статус</div><div class="value" id="status">init</div></div>
+        <div class="row"><div class="label">Адрес</div><div class="value mono" id="wallet-address"></div></div>
       </div>
     </main>
-    <script src="https://unpkg.com/@tonconnect/ui@2.3.1/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
+    <script src="/static/js/app.js"></script>
   </body>
 </html>
 """
