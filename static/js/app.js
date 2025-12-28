@@ -88,34 +88,43 @@
       buttonRootId: 'tonconnect',
     });
 
-    // If we have token (after previous login) — validate it and show "logged in".
-    const savedToken = localStorage.getItem(TOKEN_KEY);
-    if (savedToken) {
-      me(savedToken)
-        .then((u) => {
-          setAddress(u?.wallet_address || '');
-          setStatus('logged in');
-        })
-        .catch(() => {
-          localStorage.removeItem(TOKEN_KEY);
-        });
+    let isLoggedIn = false;
+
+    async function refreshMeFromToken() {
+      const savedToken = localStorage.getItem(TOKEN_KEY);
+      if (!savedToken) return;
+      try {
+        const u = await me(savedToken);
+        setAddress(u?.wallet_address || '');
+        setStatus('logged in');
+        isLoggedIn = true;
+      } catch (_) {
+        localStorage.removeItem(TOKEN_KEY);
+        isLoggedIn = false;
+      }
     }
 
-    // Prepare TON Proof request parameters for TonConnect UI
-    setStatus('loading tonproof payload');
-    tonConnectUI.setConnectRequestParameters({ state: 'loading' });
-    fetchTonproofPayload()
-      .then((payload) => {
+    async function prepareTonProof() {
+      setStatus('loading tonproof payload');
+      tonConnectUI.setConnectRequestParameters({ state: 'loading' });
+      try {
+        const payload = await fetchTonproofPayload();
         tonConnectUI.setConnectRequestParameters({
           state: 'ready',
           value: { tonProof: payload },
         });
-        setStatus('ready');
-      })
-      .catch((e) => {
+        if (!isLoggedIn) setStatus('ready');
+      } catch (e) {
         tonConnectUI.setConnectRequestParameters(null);
         setStatus(`Ошибка: ${e instanceof Error ? e.message : 'tonproof payload error'}`);
-      });
+      }
+    }
+
+    // 1) If we already have a token — we are logged in even if wallet restore doesn't include tonProof.
+    refreshMeFromToken().finally(() => {
+      // 2) Always prepare tonProof for the next connect attempt (fresh payload, 5m TTL).
+      prepareTonProof();
+    });
 
     tonConnectUI.onStatusChange(async (wallet) => {
       try {
@@ -139,7 +148,20 @@
         const publicKey = wallet?.account?.publicKey;
         const proof = wallet?.connectItems?.tonProof?.proof;
         if (!publicKey || !proof) {
+          // This happens on restore: wallet is connected but tonProof is not re-sent.
+          // If we already have a valid token, that's OK (remain logged in).
+          if (isLoggedIn) {
+            setStatus('logged in');
+            return;
+          }
+          // Otherwise, force a fresh connect flow with tonProof.
           setStatus('Ошибка: tonProof отсутствует. Переподключите кошелёк.');
+          await prepareTonProof();
+          try {
+            await tonConnectUI.disconnect();
+          } catch (_) {
+            // ignore
+          }
           return;
         }
 
@@ -154,6 +176,7 @@
         const u = await me(token);
         setAddress(u?.wallet_address || address);
         setStatus('logged in');
+        isLoggedIn = true;
       } catch (e) {
         setStatus(`Ошибка: ${e instanceof Error ? e.message : 'unknown error'}`);
       }

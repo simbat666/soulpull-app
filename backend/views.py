@@ -35,7 +35,7 @@ def index(request):
       </div>
     </main>
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/js/app.js?v=20251228-2"></script>
+    <script src="/static/js/app.js?v=20251228-3"></script>
   </body>
 </html>
 """
