@@ -6,6 +6,7 @@
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
   const addrEl = el('wallet-address');
+  const toastEl = el('toast');
 
   const tgWarningEl = el('tg-warning');
 
@@ -38,6 +39,7 @@
 
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text;
+    if (toastEl) toastEl.textContent = text;
   }
 
   function setAddress(text) {
@@ -56,6 +58,11 @@
 
   function showScreen(which) {
     // which: 'connect' | 'onboarding' | 'cabinet'
+    try {
+      document.body.dataset.screen = which;
+    } catch (_) {
+      // ignore
+    }
     if (which === 'connect') {
       show(screenConnect);
       hide(screenOnboarding);
