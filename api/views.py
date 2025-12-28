@@ -150,52 +150,58 @@ def tonproof_verify(request):
     Verifies TON Proof and returns Bearer token.
     """
     try:
-        body = json.loads(request.body or b"{}")
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid json"}, status=400)
+        try:
+            body = json.loads(request.body or b"{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "invalid json"}, status=400)
 
-    wallet_address = (body.get("wallet_address") or "").strip()
-    public_key_raw = (body.get("public_key") or "").strip()
-    proof = body.get("proof") or {}
+        wallet_address = (body.get("wallet_address") or "").strip()
+        public_key_raw = (body.get("public_key") or "").strip()
+        proof = body.get("proof") or {}
 
-    if not wallet_address:
-        return JsonResponse({"error": "wallet_address is required"}, status=400)
-    if not public_key_raw:
-        return JsonResponse({"error": "public_key is required"}, status=400)
-    if not isinstance(proof, dict):
-        return JsonResponse({"error": "proof must be an object"}, status=400)
+        if not wallet_address:
+            return JsonResponse({"error": "wallet_address is required"}, status=400)
+        if not public_key_raw:
+            return JsonResponse({"error": "public_key is required"}, status=400)
+        if not isinstance(proof, dict):
+            return JsonResponse({"error": "proof must be an object"}, status=400)
 
-    try:
-        timestamp = int(proof.get("timestamp"))
-        domain_obj = proof.get("domain") or {}
-        domain_value = str(domain_obj.get("value") or "")
-        domain_len = int(domain_obj.get("lengthBytes"))
-        payload = str(proof.get("payload") or "")
-        signature_b64 = str(proof.get("signature") or "")
-    except (TypeError, ValueError):
-        return JsonResponse({"error": "invalid proof fields"}, status=400)
+        try:
+            timestamp = int(proof.get("timestamp"))
+            domain_obj = proof.get("domain") or {}
+            domain_value = str(domain_obj.get("value") or "")
+            domain_len = int(domain_obj.get("lengthBytes"))
+            payload = str(proof.get("payload") or "")
+            signature_b64 = str(proof.get("signature") or "")
+        except (TypeError, ValueError):
+            return JsonResponse({"error": "invalid proof fields"}, status=400)
 
-    if not payload:
-        return JsonResponse({"error": "proof.payload is required"}, status=400)
-    if not signature_b64:
-        return JsonResponse({"error": "proof.signature is required"}, status=400)
-    if domain_value != _expected_domain():
-        return JsonResponse(
-            {"error": "domain mismatch", "expected": _expected_domain(), "got": domain_value},
-            status=400,
+        if not payload:
+            return JsonResponse({"error": "proof.payload is required"}, status=400)
+        if not signature_b64:
+            return JsonResponse({"error": "proof.signature is required"}, status=400)
+        if domain_value != _expected_domain():
+            return JsonResponse(
+                {"error": "domain mismatch", "expected": _expected_domain(), "got": domain_value},
+                status=400,
+            )
+        if domain_len != len(domain_value.encode("utf-8")):
+            return JsonResponse({"error": "domain length mismatch"}, status=400)
+
+        # Validate payload (DB, TTL, single-use) with minimal locking.
+        now_dt = timezone.now()
+        rec = (
+            TonProofPayload.objects.filter(
+                payload=payload,
+                used_at__isnull=True,
+                expires_at__gt=now_dt,
+            )
+            .only("id")
+            .first()
         )
-    if domain_len != len(domain_value.encode("utf-8")):
-        return JsonResponse({"error": "domain length mismatch"}, status=400)
-
-    # Validate payload (DB, TTL, single-use)
-    with transaction.atomic():
-        rec = TonProofPayload.objects.select_for_update().filter(payload=payload).first()
         if not rec:
-            return JsonResponse({"error": "unknown payload"}, status=400)
-        if rec.is_used:
-            return JsonResponse({"error": "payload already used"}, status=400)
-        if rec.is_expired():
-            return JsonResponse({"error": "payload expired"}, status=400)
+            # Could be unknown, expired, or already used. Keep message simple.
+            return JsonResponse({"error": "invalid or expired payload"}, status=400)
 
         # Verify signature
         try:
@@ -216,14 +222,19 @@ def tonproof_verify(request):
         except Exception:
             return JsonResponse({"error": "verification failed"}, status=400)
 
-        rec.used_at = timezone.now()
-        rec.save(update_fields=["used_at"])
+        # Mark payload used (single-use). If concurrent request already used it, this becomes a clean 400.
+        updated = TonProofPayload.objects.filter(id=rec.id, used_at__isnull=True).update(used_at=now_dt)
+        if updated != 1:
+            return JsonResponse({"error": "payload already used"}, status=400)
 
-    user, _created = UserProfile.objects.get_or_create(wallet_address=wallet_address)
-    user.save(update_fields=["updated_at"])
+        user, _created = UserProfile.objects.get_or_create(wallet_address=wallet_address)
+        user.save(update_fields=["updated_at"])
 
-    token = issue_token(secret=_auth_secret(), wallet_address=wallet_address, ttl_seconds=_auth_ttl_seconds())
-    return JsonResponse({"token": token})
+        token = issue_token(secret=_auth_secret(), wallet_address=wallet_address, ttl_seconds=_auth_ttl_seconds())
+        return JsonResponse({"token": token})
+    except Exception:
+        # Never return HTML 500 to frontend; keep it JSON so UI can surface the failure.
+        return JsonResponse({"error": "server_error"}, status=500)
 
 
 @csrf_exempt
