@@ -3,6 +3,7 @@ import hashlib
 import json
 import secrets
 import struct
+import logging
 
 from django.conf import settings
 from django.db import transaction
@@ -16,6 +17,8 @@ from nacl.signing import VerifyKey
 
 from .auth_tokens import issue_token, parse_bearer_token, verify_token
 from .models import TonProofPayload, UserProfile
+
+logger = logging.getLogger(__name__)
 
 
 def _b64decode_padded(data: str) -> bytes:
@@ -232,9 +235,10 @@ def tonproof_verify(request):
 
         token = issue_token(secret=_auth_secret(), wallet_address=wallet_address, ttl_seconds=_auth_ttl_seconds())
         return JsonResponse({"token": token})
-    except Exception:
+    except Exception as e:
         # Never return HTML 500 to frontend; keep it JSON so UI can surface the failure.
-        return JsonResponse({"error": "server_error"}, status=500)
+        logger.exception("tonproof_verify failed")
+        return JsonResponse({"error": "server_error", "error_type": e.__class__.__name__}, status=500)
 
 
 @csrf_exempt
