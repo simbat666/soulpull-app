@@ -8,6 +8,10 @@
   const toastEl = el('toast');
 
   const tgWarningEl = el('tg-warning');
+  const tgUserEl = el('tg-user');
+  const tgUserAvatarEl = el('tg-user-avatar');
+  const tgUserNameEl = el('tg-user-name');
+  const tgUserUsernameEl = el('tg-user-username');
 
   const screenConnect = el('screen-connect');
   const screenOnboarding = el('screen-onboarding');
@@ -54,6 +58,47 @@
   function hide(elm) {
     if (!elm) return;
     elm.classList.add('hidden');
+  }
+
+  function renderTelegramUserFromWebApp() {
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    if (!tg) {
+      hide(tgUserEl);
+      return null;
+    }
+
+    // Let Telegram know we are ready to be shown.
+    try {
+      tg.ready();
+    } catch (_) {
+      // ignore
+    }
+
+    const u = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+    if (!u) {
+      hide(tgUserEl);
+      return null;
+    }
+
+    const name = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
+    const username = u.username ? `@${u.username}` : '';
+    const photoUrl = u.photo_url || '';
+
+    if (tgUserNameEl) tgUserNameEl.textContent = name || username || 'Telegram user';
+    if (tgUserUsernameEl) tgUserUsernameEl.textContent = username || (u.id ? `id: ${u.id}` : '');
+
+    if (tgUserAvatarEl) {
+      if (photoUrl) {
+        tgUserAvatarEl.src = photoUrl;
+        tgUserAvatarEl.classList.remove('hidden');
+      } else {
+        tgUserAvatarEl.removeAttribute('src');
+        tgUserAvatarEl.classList.add('hidden');
+      }
+    }
+
+    show(tgUserEl);
+    return u;
   }
 
   function showScreen(which) {
@@ -168,9 +213,15 @@
       return;
     }
 
-    // Telegram is optional for now (we'll enforce later). Hide warning by default.
-    hide(tgWarningEl);
-    if (btnTelegramVerify) btnTelegramVerify.disabled = false;
+    // Telegram is optional for now (we'll enforce later).
+    // 1) Render TG user badge (name/@username/photo) automatically when opened inside Telegram WebApp.
+    renderTelegramUserFromWebApp();
+
+    // 2) Show/hide warning & enable/disable link button based on TG availability.
+    const hasTelegram = !!(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData);
+    if (hasTelegram) hide(tgWarningEl);
+    else show(tgWarningEl);
+    if (btnTelegramVerify) btnTelegramVerify.disabled = !hasTelegram;
 
     setStatus('init');
     setAddress('');
@@ -185,21 +236,28 @@
     let currentToken = null;
     let currentProfile = null;
     let lastPaymentIntent = null;
+    let tokenRefreshPromise = null;
+    let tokenChecked = false;
 
     async function refreshMeFromToken() {
       const savedToken = localStorage.getItem(TOKEN_KEY);
-      if (!savedToken) return;
+      if (!savedToken) {
+        tokenChecked = true;
+        return;
+      }
       try {
         const u = await me(savedToken);
         currentToken = savedToken;
         currentProfile = u;
         renderProfile(u);
         isLoggedIn = true;
+        tokenChecked = true;
       } catch (_) {
         localStorage.removeItem(TOKEN_KEY);
         currentToken = null;
         currentProfile = null;
         isLoggedIn = false;
+        tokenChecked = true;
       }
     }
 
@@ -258,8 +316,10 @@
       }
     }
 
-    // 1) If we already have a token — we are logged in even if wallet restore doesn't include tonProof.
-    refreshMeFromToken().finally(() => {
+    // 1) Start token refresh ASAP. This prevents a common race:
+    // TonConnect restores wallet quickly (without tonProof), `onStatusChange` fires,
+    // and we must NOT force-disconnect if the user already has a valid token.
+    tokenRefreshPromise = refreshMeFromToken().finally(() => {
       // 2) Always prepare tonProof for the next connect attempt (fresh payload, 5m TTL).
       prepareTonProof();
     });
@@ -289,12 +349,18 @@
         const proof = wallet?.connectItems?.tonProof?.proof;
         if (!publicKey || !proof) {
           // This happens on restore: wallet is connected but tonProof is not re-sent.
-          // If we already have a valid token, that's OK (remain logged in).
-          if (isLoggedIn) {
-            setStatus('logged in');
-            return;
+          // If token exists (or is still being checked), we must NOT disconnect,
+          // otherwise the user sees "connection reset" on every refresh.
+          const hasSavedToken = !!localStorage.getItem(TOKEN_KEY);
+          if (isLoggedIn || hasSavedToken || !tokenChecked) {
+            if (tokenRefreshPromise) await tokenRefreshPromise;
+            if (isLoggedIn) {
+              setStatus('logged in');
+              return;
+            }
           }
-          // Otherwise, force a fresh connect flow with tonProof.
+
+          // No valid token -> require a fresh connect with tonProof.
           setStatus('Ошибка: tonProof отсутствует. Переподключите кошелёк.');
           await prepareTonProof();
           try {
@@ -350,7 +416,6 @@
         setStatus('saving inviter…');
         try {
           await postWithBearer('/inviter/apply', currentToken, { inviter: v });
-          localStorage.removeItem(INVITER_KEY);
           const u = await me(currentToken);
           currentProfile = u;
           renderProfile(u);
