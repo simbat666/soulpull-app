@@ -1,7 +1,7 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
-  const UI_BUILD = 'ui-20260101-4';
+  const UI_BUILD = 'ui-20260101-5';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -66,6 +66,29 @@
     return window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
   }
 
+  function getHashParams() {
+    try {
+      const h = String(window.location.hash || '');
+      if (!h || h.length <= 1) return new URLSearchParams('');
+      return new URLSearchParams(h.startsWith('#') ? h.slice(1) : h);
+    } catch (_) {
+      return new URLSearchParams('');
+    }
+  }
+
+  function getTelegramInitDataFromUrl() {
+    // Telegram may pass init data as `tgWebAppData` in query or hash.
+    try {
+      const sp = new URLSearchParams(window.location.search || '');
+      const hp = getHashParams();
+      const raw = sp.get('tgWebAppData') || hp.get('tgWebAppData');
+      if (!raw) return null;
+      return decodeURIComponent(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
   function isTelegramUserAgent() {
     try {
       return /Telegram/i.test(navigator.userAgent || '');
@@ -85,11 +108,17 @@
     }
   }
 
+  function getTelegramInitData(tg) {
+    if (tg && tg.initData) return tg.initData;
+    return getTelegramInitDataFromUrl();
+  }
+
   function extractTelegramUser(tg) {
     if (!tg) return null;
     const u1 = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
     if (u1) return u1;
-    if (tg.initData) return parseTelegramUserFromInitData(tg.initData);
+    const initData = getTelegramInitData(tg);
+    if (initData) return parseTelegramUserFromInitData(initData);
     return null;
   }
 
@@ -143,8 +172,9 @@
 
   function updateTelegramAvailabilityUI(tg) {
     const hasWebApp = !!tg;
-    const hasInitData = !!(tg && tg.initData);
-    const isTgUA = isTelegramUserAgent();
+    const initData = getTelegramInitData(tg);
+    const hasInitData = !!initData;
+    const isTgUA = isTelegramUserAgent() || !!getTelegramInitDataFromUrl();
     if (hasWebApp) {
       hide(tgWarningEl);
     } else {
@@ -469,11 +499,12 @@
     if (btnTelegramVerify) {
       btnTelegramVerify.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
-        const tg2 = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-        if (!tg2 || !tg2.initData) return setStatus('Ошибка: Telegram initData отсутствует');
+        const tg2 = getTelegramWebApp();
+        const initData = getTelegramInitData(tg2);
+        if (!initData) return setStatus('Ошибка: Telegram initData отсутствует');
         setStatus('telegram verify…');
         try {
-          await postWithBearer('/telegram/verify', currentToken, { initData: tg2.initData });
+          await postWithBearer('/telegram/verify', currentToken, { initData });
           const u = await me(currentToken);
           currentProfile = u;
           renderProfile(u);
