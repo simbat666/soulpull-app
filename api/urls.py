@@ -20,6 +20,9 @@ urlpatterns = [
     path("payout/request", views.payout_request, name="payout_request"),
     path("payout/me", views.payout_me, name="payout_me"),
     path("payout/mark", views.payout_mark, name="payout_mark"),
+    path("jetton/wallet", views.jetton_wallet, name="jetton_wallet"),
+    path("admin/participations/pending", views.admin_participations_pending, name="admin_participations_pending"),
+    path("admin/payouts/open", views.admin_payouts_open, name="admin_payouts_open"),
     path("referrals/l1", views.referrals_l1, name="referrals_l1"),
 ]
 

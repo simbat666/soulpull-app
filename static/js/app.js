@@ -1,7 +1,7 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
-  const UI_BUILD = 'ui-20260101-6';
+  const UI_BUILD = 'ui-20260101-7';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -42,6 +42,13 @@
   const txHashInput = el('tx-hash-input');
   const btnPayConfirm = el('btn-pay-confirm');
   const btnPayCreateOld = btnPayCreate;
+
+  const ADMIN_TOKEN_KEY = 'soulpull_admin_token';
+  const adminTokenInput = el('admin-token');
+  const btnAdminRefresh = el('btn-admin-refresh');
+  const adminStatusEl = el('admin-status');
+  const adminPendingEl = el('admin-pending');
+  const adminPayoutsEl = el('admin-payouts');
 
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text;
@@ -344,6 +351,7 @@
     let currentToken = null;
     let currentProfile = null;
     let lastPaymentIntent = null;
+    let currentWalletAddress = null;
     let tokenRefreshPromise = null;
     let tokenChecked = false;
 
@@ -445,12 +453,14 @@
       try {
         const address = wallet?.account?.address;
         if (!address) {
+          currentWalletAddress = null;
           setAddress('');
           setStatus('wallet disconnected');
           showScreen('connect');
           return;
         }
 
+        currentWalletAddress = address;
         setAddress(address);
         setStatus('wallet connected');
         showScreen('onboarding');
@@ -575,10 +585,16 @@
           // SSOT: create Participation(PENDING) + payment intent in one step
           lastPaymentIntent = await postWithBearer('/participation/create', currentToken, {});
           if (paymentInfo) {
-            const ton = Number(lastPaymentIntent.amount || '0') / 1e9;
+            const usdt = Number(lastPaymentIntent.jetton_amount || '0') / 1e6;
+            const gasTon = Number(lastPaymentIntent.forward_ton_nanotons || lastPaymentIntent.amount || '0') / 1e9;
             const pid = lastPaymentIntent.participation_id ? `, participation_id: ${lastPaymentIntent.participation_id}` : '';
             const slots = lastPaymentIntent.slots_used != null ? `, slots_used: ${lastPaymentIntent.slots_used}/3` : '';
-            paymentInfo.textContent = `receiver: ${lastPaymentIntent.receiver}, amount: ${ton} TON, valid_until: ${lastPaymentIntent.valid_until}, comment: ${lastPaymentIntent.comment}${pid}${slots}`;
+            paymentInfo.textContent =
+              `pay: ${usdt} USDT` +
+              `, receiver: ${lastPaymentIntent.receiver_wallet || lastPaymentIntent.receiver}` +
+              `, gas: ~${gasTon} TON` +
+              `, valid_until: ${lastPaymentIntent.valid_until}` +
+              `, comment: ${lastPaymentIntent.comment}${pid}${slots}`;
           }
           if (btnPaySend) show(btnPaySend);
           setStatus('payment created');
@@ -593,12 +609,50 @@
     if (btnPaySend) {
       btnPaySend.addEventListener('click', async () => {
         if (!lastPaymentIntent) return setStatus('Ошибка: сначала создайте платёж');
+        if (!currentWalletAddress) return setStatus('Ошибка: кошелёк не подключен');
+        if (!window.TonWeb) return setStatus('Ошибка: tonweb не загрузился');
         try {
           setStatus('opening wallet…');
-          await tonConnectUI.sendTransaction({
-            validUntil: lastPaymentIntent.valid_until,
-            messages: [{ address: lastPaymentIntent.receiver, amount: String(lastPaymentIntent.amount) }],
+          // 1) Resolve user's USDT jetton-wallet address via backend (Toncenter).
+          const jwRes = await fetch(API_BASE + '/jetton/wallet', {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${currentToken}` },
           });
+          const jwData = await jwRes.json().catch(() => null);
+          if (!jwRes.ok) throw new Error(jwData?.error || `jetton/wallet failed: ${jwRes.status}`);
+          const userJettonWallet = jwData?.wallet_address;
+          if (!userJettonWallet) throw new Error('jetton/wallet: missing wallet_address');
+
+          // 2) Build JettonTransfer payload (op=0x0f8a7ea5) using tonweb.
+          const TonWeb = window.TonWeb;
+          const Cell = TonWeb.boc.Cell;
+          const Address = TonWeb.utils.Address;
+
+          const jettonAmount = String(lastPaymentIntent.jetton_amount || '');
+          const receiverWallet = String(lastPaymentIntent.receiver_wallet || lastPaymentIntent.receiver || '');
+          const forwardTon = String(lastPaymentIntent.forward_ton_nanotons || lastPaymentIntent.amount || '');
+          const validUntil = Number(lastPaymentIntent.valid_until || 0);
+          if (!jettonAmount || !receiverWallet || !forwardTon || !validUntil) throw new Error('payment intent incomplete');
+
+          const body = new Cell();
+          body.bits.writeUint(0x0f8a7ea5, 32); // transfer op
+          body.bits.writeUint(0, 64); // query_id
+          body.bits.writeCoins(jettonAmount); // jetton amount (USDT units)
+          body.bits.writeAddress(new Address(receiverWallet)); // destination owner
+          body.bits.writeAddress(new Address(currentWalletAddress)); // response destination
+          body.bits.writeBit(0); // no custom payload
+          body.bits.writeCoins('1'); // forward TON amount inside payload (minimal)
+          body.bits.writeBit(1); // forward payload in ref
+          body.refs.push(new Cell()); // empty payload
+
+          const payloadB64 = TonWeb.utils.bytesToBase64(body.toBoc(false));
+
+          // 3) Send transaction to user's jetton-wallet with attached TON for gas.
+          await tonConnectUI.sendTransaction({
+            validUntil,
+            messages: [{ address: userJettonWallet, amount: forwardTon, payload: payloadB64 }],
+          });
+
           setStatus('tx sent. paste tx hash below');
         } catch (e) {
           setStatus(`Ошибка: ${e instanceof Error ? e.message : 'send tx error'}`);
@@ -623,6 +677,142 @@
         }
       });
     }
+
+    // Admin panel (Strazh)
+    function setAdminStatus(t) {
+      if (adminStatusEl) adminStatusEl.textContent = t || '';
+    }
+
+    function getAdminToken() {
+      const v = (adminTokenInput?.value || '').trim() || localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+      return String(v || '').trim();
+    }
+
+    function setAdminToken(v) {
+      const t = String(v || '').trim();
+      if (adminTokenInput) adminTokenInput.value = t;
+      if (t) localStorage.setItem(ADMIN_TOKEN_KEY, t);
+    }
+
+    async function adminGet(path) {
+      const tok = getAdminToken();
+      if (!tok) throw new Error('нет X-Admin-Token');
+      const res = await fetch(API_BASE + path, { method: 'GET', headers: { 'X-Admin-Token': tok } });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `${path} failed: ${res.status}`);
+      return data;
+    }
+
+    async function adminPost(path, body) {
+      const tok = getAdminToken();
+      if (!tok) throw new Error('нет X-Admin-Token');
+      const res = await fetch(API_BASE + path, {
+        method: 'POST',
+        headers: { 'X-Admin-Token': tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || `${path} failed: ${res.status}`);
+      return data;
+    }
+
+    function renderAdminLists(pending, payouts) {
+      if (adminPendingEl) {
+        const items = pending?.items || [];
+        adminPendingEl.innerHTML =
+          '<b>Pending participations</b><br/>' +
+          (items.length
+            ? items
+                .map((p) => {
+                  const who = p.user?.telegram_username ? '@' + p.user.telegram_username : (p.user?.telegram_id ? 'tg:' + p.user.telegram_id : '—');
+                  const ref = p.referrer?.telegram_id ? 'ref:' + p.referrer.telegram_id : 'ref:—';
+                  return (
+                    `<div class="mt">` +
+                    `<div class="mono">#${p.id} ${who} ${ref} code=${p.author_code || '—'} amt=${(p.amount_usd_cents || 0) / 100}$</div>` +
+                    `<div class="field mt">` +
+                    `<input class="input" id="admin-tx-${p.id}" placeholder="tx_hash" />` +
+                    `<button class="btn" data-admin-confirm="${p.id}">Confirm</button>` +
+                    `<button class="btn" data-admin-reject="${p.id}">Reject</button>` +
+                    `</div>` +
+                    `</div>`
+                  );
+                })
+                .join('')
+            : '<span class="muted">—</span>');
+      }
+      if (adminPayoutsEl) {
+        const items = payouts?.items || [];
+        adminPayoutsEl.innerHTML =
+          '<b>Payout requests</b><br/>' +
+          (items.length
+            ? items
+                .map((p) => {
+                  const who = p.user?.telegram_username ? '@' + p.user.telegram_username : (p.user?.telegram_id ? 'tg:' + p.user.telegram_id : '—');
+                  return (
+                    `<div class="mt">` +
+                    `<div class="mono">#${p.id} ${who} amt=${(p.amount_usd_cents || 0) / 100}$ status=${p.status}</div>` +
+                    `<div class="field mt">` +
+                    `<input class="input" id="admin-payouttx-${p.id}" placeholder="tx_hash (send 1 USDT)" />` +
+                    `<button class="btn" data-admin-payout-sent="${p.id}">Sent</button>` +
+                    `<button class="btn" data-admin-payout-reject="${p.id}">Reject</button>` +
+                    `</div>` +
+                    `</div>`
+                  );
+                })
+                .join('')
+            : '<span class="muted">—</span>');
+      }
+    }
+
+    async function refreshAdmin() {
+      try {
+        const tok = (adminTokenInput?.value || '').trim();
+        if (tok) setAdminToken(tok);
+        setAdminStatus('loading…');
+        const pending = await adminGet('/admin/participations/pending');
+        const payouts = await adminGet('/admin/payouts/open');
+        renderAdminLists(pending, payouts);
+        setAdminStatus('ok');
+      } catch (e) {
+        setAdminStatus(`Ошибка: ${e instanceof Error ? e.message : 'admin error'}`);
+      }
+    }
+
+    if (adminTokenInput) {
+      const saved = localStorage.getItem(ADMIN_TOKEN_KEY);
+      if (saved) adminTokenInput.value = saved;
+    }
+    if (btnAdminRefresh) btnAdminRefresh.addEventListener('click', refreshAdmin);
+
+    document.addEventListener('click', async (ev) => {
+      const t = ev.target;
+      if (!(t instanceof HTMLElement)) return;
+      const confirmId = t.getAttribute('data-admin-confirm');
+      const rejectId = t.getAttribute('data-admin-reject');
+      const payoutSentId = t.getAttribute('data-admin-payout-sent');
+      const payoutRejectId = t.getAttribute('data-admin-payout-reject');
+
+      try {
+        if (confirmId) {
+          const tx = (document.getElementById(`admin-tx-${confirmId}`)?.value || '').trim();
+          await adminPost('/participation/confirm', { participation_id: Number(confirmId), decision: 'confirm', tx_hash: tx });
+          await refreshAdmin();
+        } else if (rejectId) {
+          const tx = (document.getElementById(`admin-tx-${rejectId}`)?.value || '').trim();
+          await adminPost('/participation/confirm', { participation_id: Number(rejectId), decision: 'reject', tx_hash: tx });
+          await refreshAdmin();
+        } else if (payoutSentId) {
+          const tx = (document.getElementById(`admin-payouttx-${payoutSentId}`)?.value || '').trim();
+          await adminPost('/payout/mark', { payout_request_id: Number(payoutSentId), decision: 'sent', tx_hash: tx });
+          await refreshAdmin();
+        } else if (payoutRejectId) {
+          await adminPost('/payout/mark', { payout_request_id: Number(payoutRejectId), decision: 'reject' });
+          await refreshAdmin();
+        }
+      } catch (e) {
+        setAdminStatus(`Ошибка: ${e instanceof Error ? e.message : 'admin action error'}`);
+      }
+    });
   }
 
   window.addEventListener('DOMContentLoaded', init);

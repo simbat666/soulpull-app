@@ -33,6 +33,7 @@ from .models import (
 )
 from .services.auth import require_user_or_401
 from .services.payments import confirm_payment, create_payment_intent
+from .services.toncenter import ToncenterError, get_jetton_wallet_address
 from .services.telegram import verify_init_data
 
 logger = logging.getLogger(__name__)
@@ -636,14 +637,25 @@ def payments_create(request):
     EventLog.objects.create(
         user=user,
         event_type=EventType.PAYMENT_CREATE,
-        payload={"comment": intent.comment, "amount_nanotons": intent.amount_nanotons},
+        payload={
+            "comment": intent.comment,
+            "forward_ton_nanotons": intent.forward_ton_nanotons,
+            "jetton_master": intent.jetton_master,
+            "jetton_amount": intent.jetton_amount,
+        },
     )
 
     return JsonResponse(
         {
-            "amount": intent.amount_nanotons,
+            # backward-compatible
+            "amount": intent.forward_ton_nanotons,
             "amount_usd_cents": intent.amount_usd_cents,
-            "receiver": intent.receiver,
+            # backward-compatible
+            "receiver": intent.receiver_wallet,
+            "forward_ton_nanotons": intent.forward_ton_nanotons,
+            "receiver_wallet": intent.receiver_wallet,
+            "jetton_master": intent.jetton_master,
+            "jetton_amount": intent.jetton_amount,
             "comment": intent.comment,
             "valid_until": intent.valid_until,
         }
@@ -720,7 +732,13 @@ def intent(request):
     EventLog.objects.create(
         user=user,
         event_type=EventType.INTENT_CREATE,
-        payload={"participation_id": part.id, "comment": pay_intent.comment, "amount_nanotons": pay_intent.amount_nanotons},
+        payload={
+            "participation_id": part.id,
+            "comment": pay_intent.comment,
+            "forward_ton_nanotons": pay_intent.forward_ton_nanotons,
+            "jetton_master": pay_intent.jetton_master,
+            "jetton_amount": pay_intent.jetton_amount,
+        },
     )
 
     return JsonResponse(
@@ -730,9 +748,15 @@ def intent(request):
             "referrer": {"telegram_id": ref_tid},
             "slots": {"used": used_slots, "limit": 3},
             "payment": {
-                "amount": pay_intent.amount_nanotons,
+                # backward-compatible
+                "amount": pay_intent.forward_ton_nanotons,
                 "amount_usd_cents": pay_intent.amount_usd_cents,
-                "receiver": pay_intent.receiver,
+                # backward-compatible
+                "receiver": pay_intent.receiver_wallet,
+                "forward_ton_nanotons": pay_intent.forward_ton_nanotons,
+                "receiver_wallet": pay_intent.receiver_wallet,
+                "jetton_master": pay_intent.jetton_master,
+                "jetton_amount": pay_intent.jetton_amount,
                 "comment": pay_intent.comment,
                 "valid_until": pay_intent.valid_until,
             },
@@ -771,9 +795,15 @@ def participation_create(request):
 
     return JsonResponse(
         {
-            "amount": pay_intent.amount_nanotons,
+            # backward-compatible
+            "amount": pay_intent.forward_ton_nanotons,
             "amount_usd_cents": pay_intent.amount_usd_cents,
-            "receiver": pay_intent.receiver,
+            # backward-compatible
+            "receiver": pay_intent.receiver_wallet,
+            "forward_ton_nanotons": pay_intent.forward_ton_nanotons,
+            "receiver_wallet": pay_intent.receiver_wallet,
+            "jetton_master": pay_intent.jetton_master,
+            "jetton_amount": pay_intent.jetton_amount,
             "comment": pay_intent.comment,
             "valid_until": pay_intent.valid_until,
             "status": part.status,
@@ -800,20 +830,33 @@ def participation_confirm(request):
     except json.JSONDecodeError:
         return JsonResponse({"error": "invalid json"}, status=400)
 
+    part_id = body.get("participation_id")
     wallet = (body.get("wallet_address") or "").strip()
     decision = (body.get("decision") or "confirm").strip().lower()
     note = (body.get("note") or "").strip()
     tx_hash = (body.get("tx_hash") or "").strip()
-    if not wallet:
-        return JsonResponse({"error": "wallet_address is required"}, status=400)
+    if not wallet and not part_id:
+        return JsonResponse({"error": "wallet_address or participation_id is required"}, status=400)
 
-    user = UserProfile.objects.filter(wallet_address=wallet).first()
-    if not user:
-        return JsonResponse({"error": "user not found"}, status=404)
-
-    part = Participation.objects.filter(user=user, status=ParticipationState.PENDING).order_by("-created_at").first()
-    if not part:
-        return JsonResponse({"error": "no pending participation"}, status=400)
+    part = None
+    user = None
+    if part_id is not None:
+        try:
+            part = Participation.objects.select_related("user").filter(id=int(part_id)).first()
+        except Exception:
+            part = None
+        if not part:
+            return JsonResponse({"error": "participation not found"}, status=404)
+        user = part.user
+        if part.status != ParticipationState.PENDING:
+            return JsonResponse({"error": "participation is not pending"}, status=400)
+    else:
+        user = UserProfile.objects.filter(wallet_address=wallet).first()
+        if not user:
+            return JsonResponse({"error": "user not found"}, status=404)
+        part = Participation.objects.filter(user=user, status=ParticipationState.PENDING).order_by("-created_at").first()
+        if not part:
+            return JsonResponse({"error": "no pending participation"}, status=400)
 
     if decision == "reject":
         part.status = ParticipationState.REJECTED
@@ -939,10 +982,11 @@ def payout_request(request):
     if open_payout:
         return JsonResponse({"error": "payout_already_requested"}, status=409)
 
+    # payout stub: 1 USDT
     pr = PayoutRequest.objects.create(
         user=user,
         amount_points=0,
-        amount_usd_cents=3300,
+        amount_usd_cents=int(os.getenv("PAYOUT_AMOUNT_USD_CENTS", "100")),
         status=PayoutStatus.REQUESTED,
     )
     EventLog.objects.create(
@@ -995,24 +1039,37 @@ def payout_mark(request):
     except json.JSONDecodeError:
         return JsonResponse({"error": "invalid json"}, status=400)
 
+    payout_id = body.get("payout_request_id")
     wallet = (body.get("wallet_address") or "").strip()
     decision = (body.get("decision") or "sent").strip().lower()
     tx_hash = (body.get("tx_hash") or "").strip()
     note = (body.get("note") or "").strip()
-    if not wallet:
-        return JsonResponse({"error": "wallet_address is required"}, status=400)
+    if not wallet and payout_id is None:
+        return JsonResponse({"error": "wallet_address or payout_request_id is required"}, status=400)
 
-    user = UserProfile.objects.filter(wallet_address=wallet).first()
-    if not user:
-        return JsonResponse({"error": "user not found"}, status=404)
-
-    pr = (
-        PayoutRequest.objects.filter(user=user, status__in=[PayoutStatus.REQUESTED, PayoutStatus.APPROVED])
-        .order_by("-created_at")
-        .first()
-    )
-    if not pr:
-        return JsonResponse({"error": "no open payout request"}, status=400)
+    pr = None
+    user = None
+    if payout_id is not None:
+        try:
+            pr = PayoutRequest.objects.select_related("user").filter(id=int(payout_id)).first()
+        except Exception:
+            pr = None
+        if not pr:
+            return JsonResponse({"error": "payout_request not found"}, status=404)
+        user = pr.user
+        if pr.status not in {PayoutStatus.REQUESTED, PayoutStatus.APPROVED}:
+            return JsonResponse({"error": "payout_request is not open"}, status=400)
+    else:
+        user = UserProfile.objects.filter(wallet_address=wallet).first()
+        if not user:
+            return JsonResponse({"error": "user not found"}, status=404)
+        pr = (
+            PayoutRequest.objects.filter(user=user, status__in=[PayoutStatus.REQUESTED, PayoutStatus.APPROVED])
+            .order_by("-created_at")
+            .first()
+        )
+        if not pr:
+            return JsonResponse({"error": "no open payout request"}, status=400)
 
     if decision == "reject":
         pr.status = PayoutStatus.REJECTED
@@ -1039,5 +1096,104 @@ def payout_mark(request):
         payload={"decision": "sent", "payout_request_id": pr.id, "tx_hash": tx_hash},
     )
     return JsonResponse({"ok": True, "status": pr.status})
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def jetton_wallet(request):
+    """
+    Returns user's jetton-wallet address for given jetton master (USDT by default).
+    Needed to send JettonTransfer via TonConnect (Tonkeeper).
+    """
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    master = (request.GET.get("master") or os.getenv("USDT_JETTON_MASTER") or "").strip()
+    if not master:
+        return JsonResponse({"error": "missing USDT_JETTON_MASTER"}, status=500)
+
+    try:
+        jw = get_jetton_wallet_address(owner_address=user.wallet_address, jetton_master_address=master)
+        return JsonResponse({"wallet_address": jw, "jetton_master": master})
+    except ToncenterError as e:
+        return JsonResponse({"error": str(e)}, status=502)
+
+
+def _require_admin(request):
+    admin_token = _admin_secret()
+    got = (request.headers.get("X-Admin-Token") or "").strip()
+    if not admin_token or got != admin_token:
+        return JsonResponse({"error": "forbidden"}, status=403)
+    return True
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def admin_participations_pending(request):
+    ok = _require_admin(request)
+    if ok is not True:
+        return ok
+    qs = (
+        Participation.objects.filter(status=ParticipationState.PENDING)
+        .select_related("user", "referrer")
+        .order_by("created_at")[:200]
+    )
+    return JsonResponse(
+        {
+            "items": [
+                {
+                    "id": p.id,
+                    "created_at": p.created_at.isoformat(),
+                    "amount_usd_cents": p.amount_usd_cents,
+                    "author_code": p.author_code,
+                    "user": {
+                        "wallet_address": p.user.wallet_address,
+                        "telegram_id": p.user.telegram_id,
+                        "telegram_username": p.user.telegram_username,
+                    },
+                    "referrer": {
+                        "wallet_address": p.referrer.wallet_address if p.referrer else None,
+                        "telegram_id": p.referrer.telegram_id if p.referrer else None,
+                        "telegram_username": p.referrer.telegram_username if p.referrer else None,
+                    },
+                }
+                for p in qs
+            ]
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def admin_payouts_open(request):
+    ok = _require_admin(request)
+    if ok is not True:
+        return ok
+    qs = (
+        PayoutRequest.objects.filter(status__in=[PayoutStatus.REQUESTED, PayoutStatus.APPROVED])
+        .select_related("user")
+        .order_by("created_at")[:200]
+    )
+    return JsonResponse(
+        {
+            "items": [
+                {
+                    "id": p.id,
+                    "created_at": p.created_at.isoformat(),
+                    "status": p.status,
+                    "amount_usd_cents": p.amount_usd_cents,
+                    "tx_hash": p.tx_hash,
+                    "user": {
+                        "wallet_address": p.user.wallet_address,
+                        "telegram_id": p.user.telegram_id,
+                        "telegram_username": p.user.telegram_username,
+                    },
+                }
+                for p in qs
+            ]
+        }
+    )
 
 

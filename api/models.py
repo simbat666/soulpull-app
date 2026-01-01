@@ -121,7 +121,7 @@ class PayoutRequest(models.Model):
     status = models.CharField(max_length=16, choices=PayoutStatus.choices, default=PayoutStatus.REQUESTED, db_index=True)
     # MVP payout stub: admin can mark SENT/PAID by providing tx hash (later: real on-chain)
     tx_hash = models.CharField(max_length=128, null=True, blank=True, db_index=True)
-    amount_usd_cents = models.IntegerField(default=3300)
+    amount_usd_cents = models.IntegerField(default=100)
     admin_note = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

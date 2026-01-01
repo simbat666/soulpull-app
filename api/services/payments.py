@@ -9,8 +9,12 @@ from api.models import Payment, PaymentStatus, ParticipationStatus, UserProfile
 
 @dataclass(frozen=True)
 class PaymentIntent:
-    amount_nanotons: str
-    receiver: str
+    # TON to attach to transaction when sending jetton transfer (gas / forward TON)
+    forward_ton_nanotons: str
+    # Receiver OWNER wallet address (not jetton wallet). Jetton transfer will send to this owner.
+    receiver_wallet: str
+    jetton_master: str
+    jetton_amount: str  # in jetton units (USDT has 6 decimals)
     comment: str
     valid_until: int  # unix seconds
     amount_usd_cents: int
@@ -21,17 +25,30 @@ def _receiver_wallet() -> str:
 
 
 def _ticket_amount_usd_cents() -> int:
-    return int(os.getenv("TICKET_AMOUNT_USD_CENTS", "1500"))
+    return int(os.getenv("TICKET_AMOUNT_USD_CENTS", "300"))
 
 
-def _ticket_amount_nanotons() -> str:
-    return (os.getenv("TICKET_AMOUNT_NANOTONS") or "").strip() or "1500000000"
+def _ticket_jetton_amount() -> str:
+    # 3 USDT (6 decimals) => 3_000_000
+    return (os.getenv("TICKET_JETTON_AMOUNT") or "").strip() or "3000000"
+
+
+def _forward_ton_nanotons() -> str:
+    # Safe default for Jetton transfer: 0.05 TON
+    return (os.getenv("PAY_FORWARD_TON_NANOTONS") or "").strip() or "50000000"
+
+
+def _jetton_master() -> str:
+    return (os.getenv("USDT_JETTON_MASTER") or "").strip()
 
 
 def create_payment_intent(user: UserProfile) -> PaymentIntent:
-    receiver = _receiver_wallet()
-    if not receiver:
+    receiver_wallet = _receiver_wallet()
+    if not receiver_wallet:
         raise ValueError("missing RECEIVER_WALLET")
+    master = _jetton_master()
+    if not master:
+        raise ValueError("missing USDT_JETTON_MASTER")
 
     now = timezone.now()
     valid_until_dt = now + timezone.timedelta(minutes=15)
@@ -40,16 +57,18 @@ def create_payment_intent(user: UserProfile) -> PaymentIntent:
     payment = Payment.objects.create(
         user=user,
         amount_usd_cents=_ticket_amount_usd_cents(),
-        amount_nanotons=_ticket_amount_nanotons(),
-        receiver_wallet=receiver,
+        amount_nanotons=_forward_ton_nanotons(),
+        receiver_wallet=receiver_wallet,
         comment=comment,
         valid_until=valid_until_dt,
         status=PaymentStatus.CREATED,
     )
 
     return PaymentIntent(
-        amount_nanotons=payment.amount_nanotons,
-        receiver=payment.receiver_wallet,
+        forward_ton_nanotons=payment.amount_nanotons,
+        receiver_wallet=payment.receiver_wallet,
+        jetton_master=master,
+        jetton_amount=_ticket_jetton_amount(),
         comment=payment.comment,
         valid_until=int(valid_until_dt.timestamp()),
         amount_usd_cents=payment.amount_usd_cents,

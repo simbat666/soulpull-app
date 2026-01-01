@@ -153,7 +153,7 @@ def index(request):
                   <div class="card__desc">MVP: создаём intent, отправляем, подтверждаем tx hash.</div>
                 </div>
                 <div class="stack">
-                  <button id="btn-pay-create" class="btn btn-indigo btn-lg">Оплатить билет</button>
+                  <button id="btn-pay-create" class="btn btn-indigo btn-lg">Оплатить 3 USDT</button>
                   <div id="payment-info" class="muted"></div>
                   <button id="btn-pay-send" class="btn mt hidden">Отправить через кошелёк</button>
                   <div class="field mt">
@@ -208,8 +208,9 @@ def index(request):
         </aside>
       </div>
     </main>
+    <script src="https://unpkg.com/tonweb@0.0.66/dist/tonweb.js"></script>
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/js/app.js?v=app-20260101-6"></script>
+    <script src="/static/js/app.js?v=app-20260101-7"></script>
   </body>
 </html>
 """

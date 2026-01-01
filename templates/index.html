@@ -137,7 +137,7 @@
                   <div class="card__desc">MVP: создаём intent, отправляем, подтверждаем tx hash.</div>
                 </div>
                 <div class="stack">
-                  <button id="btn-pay-create" class="btn btn-indigo btn-lg">Оплатить билет</button>
+                  <button id="btn-pay-create" class="btn btn-indigo btn-lg">Оплатить 3 USDT</button>
                   <div id="payment-info" class="muted"></div>
                   <button id="btn-pay-send" class="btn hidden">Отправить через кошелёк</button>
                   <div class="field">
@@ -189,12 +189,27 @@
             </div>
             <div class="toast" id="toast">init</div>
           </div>
+
+          <div class="card" id="admin-panel">
+            <div class="card__head">
+              <div class="card__title">Страж (админ)</div>
+              <div class="card__desc">Токен → список заявок → Confirm/Reject/Sent</div>
+            </div>
+            <div class="stack">
+              <input id="admin-token" class="input" placeholder="X-Admin-Token" />
+              <button id="btn-admin-refresh" class="btn">Обновить списки</button>
+              <div class="muted" id="admin-status"></div>
+              <div class="muted" id="admin-pending"></div>
+              <div class="muted" id="admin-payouts"></div>
+            </div>
+          </div>
         </aside>
       </div>
     </main>
 
+    <script src="https://unpkg.com/tonweb@0.0.66/dist/tonweb.js"></script>
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/js/app.js?v=app-20260101-6"></script>
+    <script src="/static/js/app.js?v=app-20260101-7"></script>
   </body>
 </html>
 
