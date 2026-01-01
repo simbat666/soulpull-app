@@ -85,4 +85,35 @@ gunicorn backend.wsgi:application --bind 127.0.0.1:8000 --workers 2 --timeout 30
 Nginx/Cloudflare должны прокидывать `X-Forwarded-Proto: https` — в `backend/settings.py` включено:
 `SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO','https')` и `USE_X_FORWARDED_HOST = True`.
 
+## Telegram Bot (запуск WebApp)
+
+Бот нужен, чтобы пользователь заходил **только через Telegram WebApp** и всегда получал `ref`:
+`https://refnet.click/?ref=<telegram_id>`.
+
+### Env
+
+- `TELEGRAM_BOT_TOKEN` — токен бота (НЕ коммитить)
+- `APP_URL` — базовый URL (например `https://refnet.click`)
+
+### Локально (для теста)
+
+```bash
+export TELEGRAM_BOT_TOKEN=...
+export APP_URL=https://refnet.click
+python bot/telegram_bot.py
+```
+
+### VPS (systemd)
+
+В репо есть шаблон юнита: `deploy/soulpull-telegram-bot.service`.
+
+Пример установки:
+
+```bash
+sudo cp deploy/soulpull-telegram-bot.service /etc/systemd/system/soulpull-telegram-bot.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now soulpull-telegram-bot
+sudo journalctl -u soulpull-telegram-bot -f
+```
+
 
