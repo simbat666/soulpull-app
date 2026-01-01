@@ -20,7 +20,7 @@ def index(request):
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Soulpull</title>
-    <link rel="stylesheet" href="/static/app.css?v=ui-20260101-10" />
+    <link rel="stylesheet" href="/static/app.css?v=ui-20260101-11" />
   </head>
   <body class="app" data-screen="connect">
     <div class="bg">
@@ -242,6 +242,10 @@ def index(request):
               <div class="card__desc">Живые обновления</div>
             </div>
             <div class="toast" id="toast">init</div>
+            <div class="stack mt">
+              <button id="btn-refresh" class="btn">Обновить данные (без перезагрузки)</button>
+              <div class="muted">Не используйте refresh страницы в Telegram — он сбрасывает сессию кошелька.</div>
+            </div>
           </div>
 
           <details class="details">
@@ -261,7 +265,7 @@ def index(request):
     </main>
     <script src="https://unpkg.com/tonweb@0.0.66/dist/tonweb.js"></script>
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/js/app.js?v=app-20260101-10"></script>
+    <script src="/static/js/app.js?v=app-20260101-11"></script>
   </body>
 </html>
 """

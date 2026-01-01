@@ -1,7 +1,7 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
-  const UI_BUILD = 'ui-20260101-10';
+  const UI_BUILD = 'ui-20260101-11';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -64,6 +64,7 @@
   const btnPayoutRequest = el('btn-payout-request');
   const payoutHintEl = el('payout-hint');
   const payoutListEl = el('payout-list');
+  const btnRefresh = el('btn-refresh');
 
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text;
@@ -437,6 +438,33 @@
         currentProfile = null;
         isLoggedIn = false;
         tokenChecked = true;
+      }
+    }
+
+    async function refreshAll() {
+      if (!currentToken) {
+        setStatus('нет токена (сначала подключите кошелёк)');
+        return;
+      }
+      setStatus('refreshing…');
+      try {
+        const u = await me(currentToken);
+        currentProfile = u;
+        renderProfile(u);
+        await maybeAutoTelegramVerify(u);
+        // payout list
+        try {
+          const list = await getWithBearer('/payout/me', currentToken);
+          if (payoutListEl) {
+            const items = list?.items || [];
+            payoutListEl.textContent = items.length ? items.map((x) => `#${x.id}:${x.status}`).join(', ') : '—';
+          }
+        } catch (_) {
+          // ignore
+        }
+        setStatus('ok');
+      } catch (e) {
+        setStatus(`Ошибка: ${e instanceof Error ? e.message : 'refresh error'}`);
       }
     }
 
@@ -941,6 +969,10 @@
                 .join('')
             : '<span class="muted">—</span>');
       }
+
+    if (btnRefresh) {
+      btnRefresh.addEventListener('click', refreshAll);
+    }
     }
 
     async function refreshAdmin() {
