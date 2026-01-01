@@ -1,6 +1,7 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
+  const UI_BUILD = 'ui-20260101-4';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -12,6 +13,7 @@
   const tgUserAvatarEl = el('tg-user-avatar');
   const tgUserNameEl = el('tg-user-name');
   const tgUserUsernameEl = el('tg-user-username');
+  const buildBadgeEl = el('build-badge');
 
   const screenConnect = el('screen-connect');
   const screenOnboarding = el('screen-onboarding');
@@ -62,6 +64,14 @@
 
   function getTelegramWebApp() {
     return window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  }
+
+  function isTelegramUserAgent() {
+    try {
+      return /Telegram/i.test(navigator.userAgent || '');
+    } catch (_) {
+      return false;
+    }
   }
 
   function parseTelegramUserFromInitData(initData) {
@@ -134,8 +144,18 @@
   function updateTelegramAvailabilityUI(tg) {
     const hasWebApp = !!tg;
     const hasInitData = !!(tg && tg.initData);
-    if (hasWebApp) hide(tgWarningEl);
-    else show(tgWarningEl);
+    const isTgUA = isTelegramUserAgent();
+    if (hasWebApp) {
+      hide(tgWarningEl);
+    } else {
+      // Distinguish "opened outside Telegram" from "opened in Telegram, but not as WebApp".
+      if (tgWarningEl) {
+        tgWarningEl.textContent = isTgUA
+          ? 'Открыто в Telegram, но не как WebApp. Откройте через кнопку WebApp в боте, чтобы подтянуть профиль.'
+          : 'Откройте через Telegram WebApp, чтобы привязать Telegram.';
+      }
+      show(tgWarningEl);
+    }
     if (btnTelegramVerify) btnTelegramVerify.disabled = !hasInitData;
   }
 
@@ -143,7 +163,7 @@
     // Telegram Desktop sometimes injects WebApp a bit later than DOMContentLoaded.
     // Retry a few times to avoid false negatives (warning shown + no user badge).
     let tries = 0;
-    const maxTries = 10;
+    const maxTries = 80; // ~20s
     const delayMs = 250;
 
     const tick = () => {
@@ -271,6 +291,8 @@
       setStatus('Ошибка: TonConnect UI не загрузился');
       return;
     }
+
+    if (buildBadgeEl) buildBadgeEl.textContent = `MVP · ${UI_BUILD}`;
 
     // Telegram is optional for now (we'll enforce later).
     // 1) Render TG user badge (name/@username/photo) automatically when opened inside Telegram WebApp.
