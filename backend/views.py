@@ -20,7 +20,7 @@ def index(request):
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Soulpull</title>
-    <link rel="stylesheet" href="/static/app.css?v=ui-20260101-1" />
+    <link rel="stylesheet" href="/static/app.css?v=ui-20260101-2" />
   </head>
   <body class="app" data-screen="connect">
     <div class="bg">
@@ -36,6 +36,13 @@ def index(request):
           <span class="logo__text">Soulpull</span>
         </div>
         <div class="badge">MVP</div>
+        <div class="tg-user hidden" id="tg-user">
+          <img class="tg-user__avatar" id="tg-user-avatar" alt="Telegram avatar" />
+          <div class="tg-user__meta">
+            <div class="tg-user__name" id="tg-user-name"></div>
+            <div class="tg-user__username" id="tg-user-username"></div>
+          </div>
+        </div>
       </div>
       <div class="topbar__right">
         <div class="tonconnect-slot" id="tonconnect"></div>
@@ -202,7 +209,7 @@ def index(request):
       </div>
     </main>
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/js/app.js?v=app-20260101-1"></script>
+    <script src="/static/js/app.js?v=app-20260101-2"></script>
   </body>
 </html>
 """
