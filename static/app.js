@@ -1,7 +1,7 @@
 // Compatibility loader for older cached HTML that referenced /static/app.js
 (() => {
   const s = document.createElement('script');
-  s.src = '/static/js/app.js?v=20251228-6';
+  s.src = '/static/js/app.js?v=app-20260101-1';
   s.defer = true;
   document.head.appendChild(s);
 })();
