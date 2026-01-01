@@ -1,7 +1,7 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
-  const UI_BUILD = 'ui-20260101-7';
+  const UI_BUILD = 'ui-20260101-8';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -50,6 +50,21 @@
   const adminPendingEl = el('admin-pending');
   const adminPayoutsEl = el('admin-payouts');
 
+  const btnOpenTonconnect = el('btn-open-tonconnect');
+  const nextPillEl = el('next-pill');
+  const chkWalletEl = el('chk-wallet');
+  const chkTelegramEl = el('chk-telegram');
+  const chkReferrerEl = el('chk-referrer');
+  const chkCodeEl = el('chk-code');
+  const chkPaidEl = el('chk-paid');
+  const chkConfirmedEl = el('chk-confirmed');
+  const btnNextAction = el('btn-next-action');
+  const nextHintEl = el('next-hint');
+
+  const btnPayoutRequest = el('btn-payout-request');
+  const payoutHintEl = el('payout-hint');
+  const payoutListEl = el('payout-list');
+
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text;
     if (toastEl) toastEl.textContent = text;
@@ -67,6 +82,15 @@
   function hide(elm) {
     if (!elm) return;
     elm.classList.add('hidden');
+  }
+
+  function setTag(elm, ok, text) {
+    if (!elm) return;
+    elm.textContent = text || (ok ? 'OK' : '—');
+    elm.classList.remove('tag--ok', 'tag--bad', 'tag--warn');
+    if (ok === true) elm.classList.add('tag--ok');
+    else if (ok === false) elm.classList.add('tag--bad');
+    else elm.classList.add('tag--warn');
   }
 
   function getTelegramWebApp() {
@@ -394,6 +418,8 @@
       if (authorCodeInfoEl) authorCodeInfoEl.textContent = u.author_code || '—';
 
       const status = u.participation_status || 'NEW';
+      const activePart = u.cycle?.active_participation || null;
+      const isConfirmed = activePart && activePart.status === 'CONFIRMED';
 
       if (cabWalletEl) cabWalletEl.textContent = wa || '—';
       if (cabTelegramEl) cabTelegramEl.textContent = telegramInfoEl ? telegramInfoEl.textContent : '—';
@@ -423,6 +449,51 @@
       const hasReferrer = !!u.inviter?.telegram_id;
       const hasCode = !!u.author_code;
       if (btnPayCreate) btnPayCreate.disabled = !(hasTg && hasReferrer && hasCode);
+
+      // Checklist / next action
+      setTag(chkWalletEl, !!currentWalletAddress, currentWalletAddress ? 'OK' : 'нет');
+      setTag(chkTelegramEl, hasTg, hasTg ? 'OK' : 'нужно');
+      setTag(chkReferrerEl, hasReferrer, hasReferrer ? 'OK' : 'нужно');
+      setTag(chkCodeEl, hasCode, hasCode ? 'OK' : 'нужно');
+      setTag(chkPaidEl, !!lastPaymentIntent, lastPaymentIntent ? 'создано' : 'нет');
+      setTag(chkConfirmedEl, isConfirmed ? true : null, isConfirmed ? 'CONFIRMED' : (activePart ? activePart.status : '—'));
+
+      if (nextPillEl) {
+        nextPillEl.textContent = isConfirmed ? 'Готово' : 'Шаги';
+      }
+
+      if (btnNextAction && nextHintEl) {
+        let action = null;
+        let hint = '';
+        if (!currentWalletAddress) {
+          action = () => btnOpenTonconnect?.click();
+          hint = 'Шаг 1: подключите кошелёк через TonConnect (Tonkeeper).';
+        } else if (!hasTg) {
+          action = () => btnTelegramVerify?.click();
+          hint = 'Шаг 2: нажмите «Привязать Telegram».';
+        } else if (!hasReferrer) {
+          action = () => inviterInput?.focus();
+          hint = 'Шаг 3: введите telegram_id пригласившего и нажмите «Сохранить».';
+        } else if (!hasCode) {
+          action = () => authorCodeInput?.focus();
+          hint = 'Шаг 4: введите код автора и нажмите «Применить».';
+        } else if (!lastPaymentIntent) {
+          action = () => btnPayCreate?.click();
+          hint = 'Шаг 5: нажмите «Оплатить 3 USDT» (создастся intent).';
+        } else {
+          action = () => btnPaySend?.click();
+          hint = 'Шаг 5: нажмите «Отправить через кошелёк» и подтвердите в Tonkeeper.';
+        }
+        nextHintEl.textContent = hint;
+        btnNextAction.onclick = () => {
+          try { action && action(); } catch (_) {}
+        };
+      }
+
+      // Payout UI
+      const eligible = !!u.referrals?.eligible_payout;
+      if (btnPayoutRequest) btnPayoutRequest.disabled = !eligible;
+      if (payoutHintEl) payoutHintEl.textContent = eligible ? 'Условия выполнены. Можно запросить выплату.' : 'Нужно: участие CONFIRMED + 3 подтверждённых L1.';
     }
 
     async function prepareTonProof() {
@@ -464,6 +535,7 @@
         setAddress(address);
         setStatus('wallet connected');
         showScreen('onboarding');
+        if (currentProfile) renderProfile(currentProfile);
 
         // Register wallet (legacy behavior, still required)
         try {
@@ -598,6 +670,7 @@
           }
           if (btnPaySend) show(btnPaySend);
           setStatus('payment created');
+          if (currentProfile) renderProfile(currentProfile);
         } catch (e) {
           // Surface 409 referrer_limit nicely if backend returns it as error string
           const msg = e instanceof Error ? e.message : 'payment create error';
@@ -654,6 +727,7 @@
           });
 
           setStatus('tx sent. paste tx hash below');
+          if (currentProfile) renderProfile(currentProfile);
         } catch (e) {
           setStatus(`Ошибка: ${e instanceof Error ? e.message : 'send tx error'}`);
         }
@@ -674,6 +748,37 @@
           setStatus('payment pending review');
         } catch (e) {
           setStatus(`Ошибка: ${e instanceof Error ? e.message : 'payment confirm error'}`);
+        }
+      });
+    }
+
+    if (btnOpenTonconnect) {
+      btnOpenTonconnect.addEventListener('click', async () => {
+        try {
+          // Open modal list (TonConnect UI)
+          if (tonConnectUI && tonConnectUI.openModal) {
+            await tonConnectUI.openModal();
+            return;
+          }
+        } catch (_) {}
+        // fallback: user can use top-right button
+      });
+    }
+
+    if (btnPayoutRequest) {
+      btnPayoutRequest.addEventListener('click', async () => {
+        if (!currentToken) return setStatus('Ошибка: нет токена');
+        setStatus('payout request…');
+        try {
+          await postWithBearer('/payout/request', currentToken, {});
+          setStatus('payout requested');
+          const list = await getWithBearer('/payout/me', currentToken);
+          if (payoutListEl) {
+            const items = list?.items || [];
+            payoutListEl.textContent = items.length ? items.map((x) => `#${x.id}:${x.status}`).join(', ') : '—';
+          }
+        } catch (e) {
+          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'payout request error'}`);
         }
       });
     }

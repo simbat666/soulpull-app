@@ -20,7 +20,7 @@ def index(request):
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Soulpull</title>
-    <link rel="stylesheet" href="/static/app.css?v=ui-20260101-6" />
+    <link rel="stylesheet" href="/static/app.css?v=ui-20260101-8" />
   </head>
   <body class="app" data-screen="connect">
     <div class="bg">
@@ -80,7 +80,11 @@ def index(request):
                 Кошелёк = аккаунт. Мы делаем авторизацию через <span class="kbd">TON Proof</span>.
               </p>
               <div class="hero__hint">
-                Нажмите кнопку TonConnect в правом верхнем углу и выберите кошелёк.
+                Шаг 1: нажмите кнопку ниже, выберите <b>Tonkeeper</b> и подтвердите подключение.
+              </div>
+              <div class="stack mt">
+                <button id="btn-open-tonconnect" class="btn btn-indigo btn-lg">Подключить кошелёк (TonConnect)</button>
+                <div class="muted">Если кнопка не открывается — нажмите TonConnect в правом верхнем углу.</div>
               </div>
             </div>
           </section>
@@ -88,10 +92,28 @@ def index(request):
           <section id="screen-onboarding" class="screen hidden">
             <div class="hero hero--compact">
               <h1 class="hero__title">Онбординг</h1>
-              <p class="hero__sub">Заполните данные и оплатите билет, чтобы активировать участие.</p>
+              <p class="hero__sub">Следуйте шагам ниже — мы подскажем, что нажимать дальше.</p>
             </div>
 
             <div class="cards">
+              <div class="card card--glass">
+                <div class="card__head">
+                  <div class="card__title">Что дальше</div>
+                  <div class="pill" id="next-pill">—</div>
+                </div>
+                <div class="checklist" id="checklist">
+                  <div class="checklist__row"><span class="checklist__k">Кошелёк подключён</span><span class="tag" id="chk-wallet">—</span></div>
+                  <div class="checklist__row"><span class="checklist__k">Telegram привязан</span><span class="tag" id="chk-telegram">—</span></div>
+                  <div class="checklist__row"><span class="checklist__k">Кто пригласил (telegram_id)</span><span class="tag" id="chk-referrer">—</span></div>
+                  <div class="checklist__row"><span class="checklist__k">Код автора</span><span class="tag" id="chk-code">—</span></div>
+                  <div class="checklist__row"><span class="checklist__k">Оплата отправлена (3 USDT)</span><span class="tag" id="chk-paid">—</span></div>
+                  <div class="checklist__row"><span class="checklist__k">Подтверждено админом</span><span class="tag" id="chk-confirmed">—</span></div>
+                </div>
+                <div class="stack mt">
+                  <button id="btn-next-action" class="btn btn-indigo">Сделать следующий шаг</button>
+                  <div class="muted" id="next-hint">—</div>
+                </div>
+              </div>
               <div class="card card--glass">
                 <div class="card__head">
                   <div class="card__title">Сессия</div>
@@ -149,8 +171,8 @@ def index(request):
 
               <div class="card card--accent">
                 <div class="card__head">
-                  <div class="card__title">Билет</div>
-                  <div class="card__desc">MVP: создаём intent, отправляем, подтверждаем tx hash.</div>
+                  <div class="card__title">Оплата</div>
+                  <div class="card__desc">Шаг 5: оплатите <b>3 USDT</b> через Tonkeeper. После оплаты вставьте tx hash для ручной проверки.</div>
                 </div>
                 <div class="stack">
                   <button id="btn-pay-create" class="btn btn-indigo btn-lg">Оплатить 3 USDT</button>
@@ -181,6 +203,20 @@ def index(request):
                 <div class="kv__row"><div class="kv__k">Stats</div><div class="kv__v" id="cab-stats">—</div></div>
               </div>
             </div>
+
+            <div class="cards">
+              <div class="card">
+                <div class="card__head">
+                  <div class="card__title">Выплата</div>
+                  <div class="card__desc">Когда выполнены условия, можно запросить выплату <b>$1</b>.</div>
+                </div>
+                <div class="stack">
+                  <button id="btn-payout-request" class="btn btn-indigo" disabled>Запросить выплату $1</button>
+                  <div class="muted" id="payout-hint">—</div>
+                  <div class="muted" id="payout-list"></div>
+                </div>
+              </div>
+            </div>
           </section>
         </section>
 
@@ -191,10 +227,12 @@ def index(request):
               <div class="card__desc">Что делать дальше</div>
             </div>
             <ul class="tips">
-              <li><b>Connect</b>: подключите кошелёк через TonConnect.</li>
-              <li><b>Login</b>: подтвердите TON Proof (всё происходит автоматически).</li>
-              <li><b>Onboarding</b>: привяжите Telegram, inviter и код автора.</li>
-              <li><b>Ticket</b>: создайте платёж и подтвердите tx hash.</li>
+              <li><b>1)</b> Подключите кошелёк (TonConnect).</li>
+              <li><b>2)</b> Нажмите «Привязать Telegram».</li>
+              <li><b>3)</b> Введите <b>telegram_id</b> пригласившего.</li>
+              <li><b>4)</b> Введите <b>код автора</b>.</li>
+              <li><b>5)</b> Нажмите «Оплатить 3 USDT» → «Отправить через кошелёк».</li>
+              <li><b>6)</b> Вставьте tx hash → админ подтверждает.</li>
             </ul>
           </div>
 
@@ -205,12 +243,25 @@ def index(request):
             </div>
             <div class="toast" id="toast">init</div>
           </div>
+
+          <details class="details">
+            <summary class="details__summary">Страж (админ)</summary>
+            <div class="card mt">
+              <div class="stack">
+                <input id="admin-token" class="input" placeholder="X-Admin-Token" />
+                <button id="btn-admin-refresh" class="btn">Обновить списки</button>
+                <div class="muted" id="admin-status"></div>
+                <div class="muted" id="admin-pending"></div>
+                <div class="muted" id="admin-payouts"></div>
+              </div>
+            </div>
+          </details>
         </aside>
       </div>
     </main>
     <script src="https://unpkg.com/tonweb@0.0.66/dist/tonweb.js"></script>
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/js/app.js?v=app-20260101-7"></script>
+    <script src="/static/js/app.js?v=app-20260101-8"></script>
   </body>
 </html>
 """
