@@ -1,7 +1,7 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
-  const UI_BUILD = 'ui-20260101-8';
+  const UI_BUILD = 'ui-20260101-9';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -379,6 +379,34 @@
     let tokenRefreshPromise = null;
     let tokenChecked = false;
 
+    async function maybeAutoTelegramVerify(profile) {
+      // If TG initData exists and profile isn't linked yet -> auto-link (no manual click).
+      if (!currentToken) return;
+      if (profile?.telegram?.id) return;
+
+      const tg = getTelegramWebApp();
+      const initData = getTelegramInitData(tg);
+      if (!initData) return;
+
+      try {
+        if (btnTelegramVerify) {
+          btnTelegramVerify.disabled = true;
+          btnTelegramVerify.textContent = 'Привязка Telegram…';
+        }
+        await postWithBearer('/telegram/verify', currentToken, { initData });
+        const u = await me(currentToken);
+        currentProfile = u;
+        renderProfile(u);
+        setStatus('telegram linked');
+      } catch (e) {
+        // Leave a manual fallback button if auto-link failed.
+        if (btnTelegramVerify) {
+          btnTelegramVerify.disabled = false;
+          btnTelegramVerify.textContent = 'Привязать Telegram';
+        }
+      }
+    }
+
     async function refreshMeFromToken() {
       const savedToken = localStorage.getItem(TOKEN_KEY);
       if (!savedToken) {
@@ -390,6 +418,7 @@
         currentToken = savedToken;
         currentProfile = u;
         renderProfile(u);
+        await maybeAutoTelegramVerify(u);
         isLoggedIn = true;
         tokenChecked = true;
       } catch (_) {
@@ -449,6 +478,19 @@
       const hasReferrer = !!u.inviter?.telegram_id;
       const hasCode = !!u.author_code;
       if (btnPayCreate) btnPayCreate.disabled = !(hasTg && hasReferrer && hasCode);
+
+      // Telegram button UX: hide/disable when already linked.
+      if (btnTelegramVerify) {
+        if (hasTg) {
+          btnTelegramVerify.disabled = true;
+          btnTelegramVerify.textContent = 'Telegram привязан';
+        } else {
+          // Keep enabled only if initData exists (or will be auto-linked soon)
+          const initData = getTelegramInitData(getTelegramWebApp());
+          btnTelegramVerify.disabled = !initData;
+          btnTelegramVerify.textContent = 'Привязать Telegram';
+        }
+      }
 
       // Checklist / next action
       setTag(chkWalletEl, !!currentWalletAddress, currentWalletAddress ? 'OK' : 'нет');
@@ -548,8 +590,7 @@
         const proof = wallet?.connectItems?.tonProof?.proof;
         if (!publicKey || !proof) {
           // This happens on restore: wallet is connected but tonProof is not re-sent.
-          // If token exists (or is still being checked), we must NOT disconnect,
-          // otherwise the user sees "connection reset" on every refresh.
+          // If token exists (or is still being checked), that's OK (stay logged in).
           const hasSavedToken = !!localStorage.getItem(TOKEN_KEY);
           if (isLoggedIn || hasSavedToken || !tokenChecked) {
             if (tokenRefreshPromise) await tokenRefreshPromise;
@@ -560,13 +601,9 @@
           }
 
           // No valid token -> require a fresh connect with tonProof.
-          setStatus('Ошибка: tonProof отсутствует. Переподключите кошелёк.');
+          // IMPORTANT: do NOT auto-disconnect on refresh, it looks like "TonConnect reset".
+          setStatus('Нужна авторизация: откройте TonConnect и переподключите кошелёк.');
           await prepareTonProof();
-          try {
-            await tonConnectUI.disconnect();
-          } catch (_) {
-            // ignore
-          }
           return;
         }
 
@@ -582,6 +619,7 @@
         const u = await me(token);
         currentProfile = u;
         renderProfile(u);
+        await maybeAutoTelegramVerify(u);
         isLoggedIn = true;
       } catch (e) {
         setStatus(`Ошибка: ${e instanceof Error ? e.message : 'unknown error'}`);
