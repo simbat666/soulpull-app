@@ -169,15 +169,27 @@
       return;
     }
 
-    // Telegram gate (SSOT): if not opened in Telegram WebApp, show only notice and stop.
+    // Telegram gate (SSOT):
+    // - If NOT in Telegram at all -> block everything (no TonConnect init).
+    // - If in Telegram but initData is missing/empty (sometimes on Desktop/WebView) -> allow TonConnect,
+    //   but disable Telegram binding + payments until reopened properly via the bot WebApp button.
     const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-    if (!tg || !tg.initData) {
+    const isTelegram = !!tg;
+    const hasInitData = !!(tg && tg.initData && String(tg.initData).length > 0);
+
+    if (!isTelegram) {
       show(tgWarningEl);
       if (btnTelegramVerify) btnTelegramVerify.disabled = true;
-      // Hard gate: don't allow actions outside Telegram
       showScreen('connect');
       setStatus('Откройте через Telegram WebApp');
       return;
+    }
+
+    // Inside Telegram: show warning only when initData is missing (cannot bind Telegram).
+    if (!hasInitData) {
+      show(tgWarningEl);
+      if (btnTelegramVerify) btnTelegramVerify.disabled = true;
+      setStatus('Telegram initData отсутствует — откройте WebApp через кнопку бота');
     } else {
       hide(tgWarningEl);
       if (btnTelegramVerify) btnTelegramVerify.disabled = false;
