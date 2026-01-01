@@ -515,7 +515,9 @@
       const hasTg = !!u.telegram?.id;
       const hasReferrer = !!u.inviter?.telegram_id;
       const hasCode = !!u.author_code;
-      if (btnPayCreate) btnPayCreate.disabled = !(hasTg && hasReferrer && hasCode);
+      // Don't hard-disable the pay button: disabled buttons feel "dead" (no click feedback).
+      // We still enforce rules inside the click handler with a clear status message.
+      if (btnPayCreate) btnPayCreate.disabled = false;
 
       // Telegram button UX: hide/disable when already linked.
       if (btnTelegramVerify) {
