@@ -1,7 +1,7 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
-  const UI_BUILD = 'ui-20260101-5';
+  const UI_BUILD = 'ui-20260101-6';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -114,38 +114,40 @@
   }
 
   function extractTelegramUser(tg) {
-    if (!tg) return null;
-    const u1 = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+    // tg may be null (Telegram Desktop sometimes doesn't inject WebApp object),
+    // but initData can still be present in URL as tgWebAppData.
+    const u1 = tg && tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
     if (u1) return u1;
     const initData = getTelegramInitData(tg);
     if (initData) return parseTelegramUserFromInitData(initData);
     return null;
   }
 
-  function renderTelegramUserFromWebApp(tg) {
-    if (!tg) {
-      hide(tgUserEl);
-      return null;
-    }
+  function renderTelegramUser(tg) {
+    // Render from either WebApp object or tgWebAppData URL param.
+    const initData = getTelegramInitData(tg);
+    const u = extractTelegramUser(tg);
 
     // Let Telegram know we are ready to be shown.
-    try {
-      tg.ready();
-    } catch (_) {
-      // ignore
+    if (tg) {
+      try {
+        tg.ready();
+      } catch (_) {
+        // ignore
+      }
     }
 
-    const u = extractTelegramUser(tg);
     if (!u) {
-      // We are inside Telegram WebApp, but user data is not available.
-      // Show a small badge so it's obvious the page sees Telegram, but initData/user is missing.
-      if (tgUserNameEl) tgUserNameEl.textContent = 'Telegram WebApp';
-      if (tgUserUsernameEl) tgUserUsernameEl.textContent = 'initData/user missing';
+      // Show a small badge so it's obvious what we detected.
+      const where = tg ? 'Telegram WebApp' : initData ? 'Telegram initData' : 'Telegram';
+      if (tgUserNameEl) tgUserNameEl.textContent = where;
+      if (tgUserUsernameEl) tgUserUsernameEl.textContent = initData ? 'user missing in initData' : 'initData missing';
       if (tgUserAvatarEl) {
         tgUserAvatarEl.removeAttribute('src');
         tgUserAvatarEl.classList.add('hidden');
       }
-      show(tgUserEl);
+      if (tg || initData || isTelegramUserAgent()) show(tgUserEl);
+      else hide(tgUserEl);
       return null;
     }
 
@@ -175,7 +177,7 @@
     const initData = getTelegramInitData(tg);
     const hasInitData = !!initData;
     const isTgUA = isTelegramUserAgent() || !!getTelegramInitDataFromUrl();
-    if (hasWebApp) {
+    if (hasWebApp || hasInitData) {
       hide(tgWarningEl);
     } else {
       // Distinguish "opened outside Telegram" from "opened in Telegram, but not as WebApp".
@@ -199,7 +201,7 @@
     const tick = () => {
       const tg = getTelegramWebApp();
       updateTelegramAvailabilityUI(tg);
-      renderTelegramUserFromWebApp(tg);
+      renderTelegramUser(tg);
 
       // Stop when we have WebApp or we exhausted retries.
       if (tg || tries >= maxTries) return;

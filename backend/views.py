@@ -20,7 +20,7 @@ def index(request):
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Soulpull</title>
-    <link rel="stylesheet" href="/static/app.css?v=ui-20260101-5" />
+    <link rel="stylesheet" href="/static/app.css?v=ui-20260101-6" />
   </head>
   <body class="app" data-screen="connect">
     <div class="bg">
@@ -209,7 +209,7 @@ def index(request):
       </div>
     </main>
     <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
-    <script src="/static/js/app.js?v=app-20260101-5"></script>
+    <script src="/static/js/app.js?v=app-20260101-6"></script>
   </body>
 </html>
 """
