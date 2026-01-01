@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import EventLog, Payment, PayoutRequest, TonProofPayload, UserProfile
+from .models import AuthorCode, EventLog, Participation, Payment, PayoutRequest, TonProofPayload, UserProfile
 
 
 @admin.register(UserProfile)
@@ -46,5 +46,30 @@ class TonProofPayloadAdmin(admin.ModelAdmin):
     list_display = ("payload", "expires_at", "used_at", "created_at")
     search_fields = ("payload",)
     list_filter = ("used_at",)
+
+
+@admin.register(AuthorCode)
+class AuthorCodeAdmin(admin.ModelAdmin):
+    list_display = ("code", "owner", "active", "created_at")
+    search_fields = ("code", "owner__wallet_address")
+    list_filter = ("active",)
+
+
+@admin.action(description="Confirm selected participations")
+def confirm_participations(modeladmin, request, queryset):
+    queryset.update(status="CONFIRMED")
+
+
+@admin.action(description="Reject selected participations")
+def reject_participations(modeladmin, request, queryset):
+    queryset.update(status="REJECTED")
+
+
+@admin.register(Participation)
+class ParticipationAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "amount_usd_cents", "status", "tx_hash", "created_at", "confirmed_at")
+    search_fields = ("tx_hash", "user__wallet_address")
+    list_filter = ("status",)
+    actions = [confirm_participations, reject_participations]
 
 

@@ -14,6 +14,9 @@ urlpatterns = [
     path("author-code/apply", views.author_code_apply, name="author_code_apply"),
     path("payments/create", views.payments_create, name="payments_create"),
     path("payments/confirm", views.payments_confirm, name="payments_confirm"),
+    path("participation/create", views.participation_create, name="participation_create"),
+    path("participation/confirm", views.participation_confirm, name="participation_confirm"),
+    path("referrals/l1", views.referrals_l1, name="referrals_l1"),
 ]
 
 

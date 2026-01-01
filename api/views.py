@@ -17,7 +17,16 @@ from nacl.exceptions import BadSignatureError
 from nacl.signing import VerifyKey
 
 from .auth_tokens import issue_token, parse_bearer_token, verify_token
-from .models import EventLog, EventType, ParticipationStatus, TonProofPayload, UserProfile
+from .models import (
+    AuthorCode,
+    EventLog,
+    EventType,
+    Participation,
+    ParticipationState,
+    ParticipationStatus,
+    TonProofPayload,
+    UserProfile,
+)
 from .services.auth import require_user_or_401
 from .services.payments import confirm_payment, create_payment_intent
 from .services.telegram import verify_init_data
@@ -395,11 +404,20 @@ def author_code_apply(request):
     if not code:
         return JsonResponse({"error": "code is required"}, status=400)
 
+    ac = AuthorCode.objects.filter(code=code, active=True).select_related("owner").first()
+    if not ac:
+        return JsonResponse({"error": "invalid author code"}, status=400)
+
     user.author_code = code
     user.author_code_applied_at = timezone.now()
-    user.save(update_fields=["author_code", "author_code_applied_at", "updated_at"])
+    user.points = int(user.points or 0) + 10
+    user.save(update_fields=["author_code", "author_code_applied_at", "points", "updated_at"])
 
-    EventLog.objects.create(user=user, event_type=EventType.APPLY_CODE, payload={"code": code})
+    # Author gets points immediately (USDT obligation handled on confirm later; MVP only tracks points)
+    ac.owner.points = int(ac.owner.points or 0) + 10
+    ac.owner.save(update_fields=["points", "updated_at"])
+
+    EventLog.objects.create(user=user, event_type=EventType.APPLY_CODE, payload={"code": code, "author_wallet": ac.owner.wallet_address})
     return JsonResponse({"ok": True})
 
 
@@ -410,6 +428,12 @@ def payments_create(request):
     if isinstance(user_or_resp, JsonResponse):
         return user_or_resp
     user = user_or_resp
+
+    # SSOT: app works only in Telegram + inviter required before participation/payment
+    if not user.telegram_id:
+        return JsonResponse({"error": "telegram required"}, status=400)
+    if not user.inviter_set_at:
+        return JsonResponse({"error": "inviter required"}, status=400)
 
     try:
         intent = create_payment_intent(user)
@@ -441,6 +465,11 @@ def payments_confirm(request):
         return user_or_resp
     user = user_or_resp
 
+    if not user.telegram_id:
+        return JsonResponse({"error": "telegram required"}, status=400)
+    if not user.inviter_set_at:
+        return JsonResponse({"error": "inviter required"}, status=400)
+
     try:
         body = json.loads(request.body or b"{}")
     except json.JSONDecodeError:
@@ -459,5 +488,125 @@ def payments_confirm(request):
     )
 
     return JsonResponse({"ok": True, "status": payment.status})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def participation_create(request):
+    """
+    SSOT: create Participation(PENDING) and return payment intent to send 15 USDT (MVP uses TON transfer placeholder).
+    We reuse /payments/create logic for now, but also create a Participation record.
+    """
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    if not user.telegram_id:
+        return JsonResponse({"error": "telegram required"}, status=400)
+    if not user.inviter_set_at:
+        return JsonResponse({"error": "inviter required"}, status=400)
+
+    # anti-abuse: allow new participation only when ACTIVE/COMPLETED? (MVP: one at a time unless COMPLETED)
+    if Participation.objects.filter(user=user, status=ParticipationState.PENDING).exists():
+        return JsonResponse({"error": "pending participation exists"}, status=400)
+
+    try:
+        intent = create_payment_intent(user)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    Participation.objects.create(user=user, amount_usd_cents=intent.amount_usd_cents, status=ParticipationState.PENDING)
+
+    return JsonResponse(
+        {
+            "amount": intent.amount_nanotons,
+            "amount_usd_cents": intent.amount_usd_cents,
+            "receiver": intent.receiver,
+            "comment": intent.comment,
+            "valid_until": intent.valid_until,
+            "status": "PENDING",
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def participation_confirm(request):
+    """
+    Admin-only: confirm participation (MVP manual).
+    Auth via X-Admin-Token env var.
+    """
+    admin_token = (os.getenv("ADMIN_TOKEN") or "").strip()
+    got = (request.headers.get("X-Admin-Token") or "").strip()
+    if not admin_token or got != admin_token:
+        return JsonResponse({"error": "forbidden"}, status=403)
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    wallet = (body.get("wallet_address") or "").strip()
+    decision = (body.get("decision") or "confirm").strip().lower()
+    note = (body.get("note") or "").strip()
+    if not wallet:
+        return JsonResponse({"error": "wallet_address is required"}, status=400)
+
+    user = UserProfile.objects.filter(wallet_address=wallet).first()
+    if not user:
+        return JsonResponse({"error": "user not found"}, status=404)
+
+    part = Participation.objects.filter(user=user, status=ParticipationState.PENDING).order_by("-created_at").first()
+    if not part:
+        return JsonResponse({"error": "no pending participation"}, status=400)
+
+    if decision == "reject":
+        part.status = ParticipationState.REJECTED
+        part.admin_note = note
+        part.confirmed_at = timezone.now()
+        part.save(update_fields=["status", "admin_note", "confirmed_at"])
+        user.participation_status = ParticipationStatus.NEW
+        user.save(update_fields=["participation_status", "updated_at"])
+        return JsonResponse({"ok": True, "status": "REJECTED"})
+
+    part.status = ParticipationState.CONFIRMED
+    part.admin_note = note
+    part.confirmed_at = timezone.now()
+    part.save(update_fields=["status", "admin_note", "confirmed_at"])
+
+    user.participation_status = ParticipationStatus.ACTIVE
+    user.save(update_fields=["participation_status", "updated_at"])
+    return JsonResponse({"ok": True, "status": "CONFIRMED"})
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def referrals_l1(request):
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    qs = UserProfile.objects.none()
+    if user.telegram_id:
+        qs = qs | UserProfile.objects.filter(inviter_telegram_id=user.telegram_id)
+    qs = qs | UserProfile.objects.filter(inviter_wallet_address=user.wallet_address)
+    qs = qs.order_by("-created_at")[:200]
+
+    return JsonResponse(
+        {
+            "items": [
+                {
+                    "wallet_address": u.wallet_address,
+                    "telegram_id": u.telegram_id,
+                    "telegram_username": u.telegram_username,
+                    "participation_status": u.participation_status,
+                    "created_at": u.created_at.isoformat(),
+                }
+                for u in qs
+            ]
+        }
+    )
 
 

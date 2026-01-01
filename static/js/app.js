@@ -36,6 +36,7 @@
   const paymentInfo = el('payment-info');
   const txHashInput = el('tx-hash-input');
   const btnPayConfirm = el('btn-pay-confirm');
+  const btnPayCreateOld = btnPayCreate;
 
   function setStatus(text) {
     if (statusEl) statusEl.textContent = text;
@@ -146,6 +147,16 @@
     return data;
   }
 
+  async function getWithBearer(path, token) {
+    const res = await fetch(API_BASE + path, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || `${path} failed: ${res.status}`);
+    return data;
+  }
+
   function getTonConnectCtor() {
     const ns = window.TON_CONNECT_UI;
     return ns?.TonConnectUI || ns?.TONConnectUI;
@@ -158,11 +169,15 @@
       return;
     }
 
-    // Telegram environment hint
+    // Telegram gate (SSOT): if not opened in Telegram WebApp, show only notice and stop.
     const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
     if (!tg || !tg.initData) {
       show(tgWarningEl);
       if (btnTelegramVerify) btnTelegramVerify.disabled = true;
+      // Hard gate: don't allow actions outside Telegram
+      showScreen('connect');
+      setStatus('Откройте через Telegram WebApp');
+      return;
     } else {
       hide(tgWarningEl);
       if (btnTelegramVerify) btnTelegramVerify.disabled = false;
@@ -243,6 +258,11 @@
         showScreen('onboarding');
         setStatus('logged in');
       }
+
+      // SSOT: inviter is mandatory before participation/payment.
+      const inviterOk = !!u.inviter?.set_at;
+      if (btnPayCreate) btnPayCreate.disabled = !inviterOk;
+      if (!inviterOk) setStatus('Нужно указать inviter (обязательно)');
     }
 
     async function applyPendingInviterIfAny() {
@@ -401,9 +421,11 @@
     if (btnPayCreate) {
       btnPayCreate.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
+        if (!currentProfile?.inviter?.set_at) return setStatus('Ошибка: inviter обязателен');
         setStatus('creating payment…');
         try {
-          lastPaymentIntent = await postWithBearer('/payments/create', currentToken, {});
+          // SSOT: create Participation(PENDING) + payment intent in one step
+          lastPaymentIntent = await postWithBearer('/participation/create', currentToken, {});
           if (paymentInfo) {
             const ton = Number(lastPaymentIntent.amount || '0') / 1e9;
             paymentInfo.textContent = `receiver: ${lastPaymentIntent.receiver}, amount: ${ton} TON, valid_until: ${lastPaymentIntent.valid_until}, comment: ${lastPaymentIntent.comment}`;
@@ -435,6 +457,7 @@
     if (btnPayConfirm) {
       btnPayConfirm.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
+        if (!currentProfile?.inviter?.set_at) return setStatus('Ошибка: inviter обязателен');
         const tx = (txHashInput?.value || '').trim();
         if (!tx) return setStatus('Ошибка: tx_hash пустой');
         setStatus('confirming payment…');

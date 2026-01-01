@@ -46,6 +46,10 @@ class UserProfile(models.Model):
         indexes = [
             models.Index(fields=["wallet_address"]),
         ]
+        constraints = [
+            # SQLite allows multiple NULLs in UNIQUE, which is what we want.
+            models.UniqueConstraint(fields=["telegram_id"], name="uniq_user_profiles_telegram_id"),
+        ]
 
     def __str__(self) -> str:
         return self.wallet_address
@@ -146,6 +150,41 @@ class EventLog(models.Model):
         db_table = "event_logs"
         indexes = [
             models.Index(fields=["event_type", "created_at"]),
+        ]
+
+
+class AuthorCode(models.Model):
+    code = models.CharField(max_length=64, unique=True, db_index=True)
+    owner = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name="owned_author_codes")
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "author_codes"
+        indexes = [
+            models.Index(fields=["code", "active"]),
+        ]
+
+
+class ParticipationState(models.TextChoices):
+    PENDING = "PENDING", "PENDING"
+    CONFIRMED = "CONFIRMED", "CONFIRMED"
+    REJECTED = "REJECTED", "REJECTED"
+
+
+class Participation(models.Model):
+    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name="participations")
+    amount_usd_cents = models.IntegerField(default=1500)
+    tx_hash = models.CharField(max_length=128, null=True, blank=True, db_index=True)
+    status = models.CharField(max_length=16, choices=ParticipationState.choices, default=ParticipationState.PENDING, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    admin_note = models.TextField(null=True, blank=True)
+
+    class Meta:
+        db_table = "participations"
+        indexes = [
+            models.Index(fields=["user", "status"]),
         ]
 
 
