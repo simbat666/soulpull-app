@@ -12,10 +12,14 @@ urlpatterns = [
     path("telegram/verify", views.telegram_verify, name="telegram_verify"),
     path("inviter/apply", views.inviter_apply, name="inviter_apply"),
     path("author-code/apply", views.author_code_apply, name="author_code_apply"),
+    path("intent", views.intent, name="intent"),
     path("payments/create", views.payments_create, name="payments_create"),
     path("payments/confirm", views.payments_confirm, name="payments_confirm"),
     path("participation/create", views.participation_create, name="participation_create"),
     path("participation/confirm", views.participation_confirm, name="participation_confirm"),
+    path("payout/request", views.payout_request, name="payout_request"),
+    path("payout/me", views.payout_me, name="payout_me"),
+    path("payout/mark", views.payout_mark, name="payout_mark"),
     path("referrals/l1", views.referrals_l1, name="referrals_l1"),
 ]
 

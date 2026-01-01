@@ -5,6 +5,8 @@ import os
 import secrets
 import struct
 import logging
+from datetime import datetime, timezone as dt_timezone
+from typing import Optional
 
 from django.conf import settings
 from django.db import transaction
@@ -24,6 +26,8 @@ from .models import (
     Participation,
     ParticipationState,
     ParticipationStatus,
+    PayoutRequest,
+    PayoutStatus,
     TonProofPayload,
     UserProfile,
 )
@@ -108,6 +112,143 @@ def _auth_secret() -> str:
 
 def _auth_ttl_seconds() -> int:
     return int(getattr(settings, "AUTH_TOKEN_TTL_SECONDS", 24 * 60 * 60))
+
+
+def _admin_secret() -> str:
+    """
+    Backward-compatible: accept either ADMIN_TOKEN or X_ADMIN_TOKEN env var.
+    """
+    return (os.getenv("X_ADMIN_TOKEN") or os.getenv("ADMIN_TOKEN") or "").strip()
+
+
+def _cycle_start_dt(user: UserProfile) -> datetime:
+    """
+    Current cycle start = moment of last SENT payout (we map it to PayoutStatus.PAID).
+    """
+    last_paid = (
+        PayoutRequest.objects.filter(user=user, status=PayoutStatus.PAID)
+        .order_by("-updated_at")
+        .only("updated_at")
+        .first()
+    )
+    if last_paid and last_paid.updated_at:
+        return last_paid.updated_at
+    return datetime(1970, 1, 1, tzinfo=dt_timezone.utc)
+
+
+def _active_participation(user: UserProfile) -> Optional[Participation]:
+    start = _cycle_start_dt(user)
+    return (
+        Participation.objects.filter(
+            user=user,
+            created_at__gt=start,
+            status__in=[ParticipationState.PENDING, ParticipationState.CONFIRMED],
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _referrer_used_slots(referrer: UserProfile) -> int:
+    start = _cycle_start_dt(referrer)
+    return (
+        Participation.objects.filter(
+            referrer=referrer,
+            created_at__gt=start,
+            status__in=[ParticipationState.PENDING, ParticipationState.CONFIRMED],
+        )
+        .count()
+    )
+
+
+def _referrer_cycle_l1_qs(referrer: UserProfile):
+    """
+    L1 participations that count towards 3/3 payout condition:
+    - created after referrer's active participation started
+    - status CONFIRMED
+    """
+    active = _active_participation(referrer)
+    if not active or active.status != ParticipationState.CONFIRMED:
+        return Participation.objects.none()
+    return Participation.objects.filter(
+        referrer=referrer,
+        status=ParticipationState.CONFIRMED,
+        created_at__gt=active.created_at,
+    )
+
+
+def _confirmed_l1_count(referrer: UserProfile) -> int:
+    return _referrer_cycle_l1_qs(referrer).values("user_id").distinct().count()
+
+
+def _create_intent(*, user: UserProfile, referrer_telegram_id: int, author_code: str):
+    """
+    Reserve a referrer slot (3/3) and create Participation(PENDING) for user.
+    Returns (participation, payment_intent, used_slots).
+    """
+    if not user.telegram_id:
+        raise ValueError("telegram_required")
+    if not author_code:
+        raise ValueError("author_code_required")
+    if user.author_code and user.author_code != author_code:
+        raise ValueError("author_code_already_set")
+
+    # Active cycle check: user can't start a new cycle until payout is SENT/PAID.
+    if _active_participation(user):
+        raise ValueError("active_cycle")
+
+    # Ensure author code persisted on profile (required by business rules).
+    if not user.author_code:
+        user.author_code = author_code
+        user.author_code_applied_at = timezone.now()
+        user.save(update_fields=["author_code", "author_code_applied_at", "updated_at"])
+        # optional points on known code
+        ac = AuthorCode.objects.filter(code=author_code, active=True).select_related("owner").first()
+        if ac:
+            user.points = int(user.points or 0) + 10
+            user.save(update_fields=["points", "updated_at"])
+            ac.owner.points = int(ac.owner.points or 0) + 10
+            ac.owner.save(update_fields=["points", "updated_at"])
+        EventLog.objects.create(
+            user=user,
+            event_type=EventType.APPLY_CODE,
+            payload={"code": author_code, "known": bool(ac), "author_wallet": ac.owner.wallet_address if ac else None},
+        )
+
+    # Create payment intent (stub today, TON/USDT later)
+    pay_intent = create_payment_intent(user)
+
+    # Slot reservation must be atomic with referrer lock
+    referrer = (
+        UserProfile.objects.select_for_update()
+        .filter(telegram_id=referrer_telegram_id)
+        .first()
+    )
+    if not referrer:
+        raise ValueError("referrer_not_found")
+    if referrer.id == user.id:
+        raise ValueError("self_referral")
+
+    used_slots = _referrer_used_slots(referrer)
+    if used_slots >= 3:
+        raise RuntimeError("referrer_limit")
+
+    part = Participation.objects.create(
+        user=user,
+        referrer=referrer,
+        author_code=user.author_code,
+        amount_usd_cents=pay_intent.amount_usd_cents,
+        status=ParticipationState.PENDING,
+    )
+
+    # Store candidate referrer on profile for UI (optional)
+    user.inviter_telegram_id = referrer.telegram_id
+    user.inviter_wallet_address = None
+    user.inviter_set_at = timezone.now()
+    user.participation_status = ParticipationStatus.PENDING
+    user.save(update_fields=["inviter_telegram_id", "inviter_wallet_address", "inviter_set_at", "participation_status", "updated_at"])
+
+    return part, pay_intent, used_slots + 1
 
 
 @csrf_exempt
@@ -271,6 +412,42 @@ def me(request):
     if not obj:
         return JsonResponse({"error": "user not found"}, status=404)
 
+    active = _active_participation(obj)
+    cycle_start = _cycle_start_dt(obj)
+    payout_window_start = active.created_at if active else None
+
+    l1_qs = (
+        Participation.objects.filter(referrer=obj, created_at__gt=cycle_start)
+        .select_related("user")
+        .order_by("-created_at")[:200]
+    )
+    l1_items = []
+    for p in l1_qs:
+        paid = p.status == ParticipationState.CONFIRMED and (payout_window_start is not None and p.created_at > payout_window_start)
+        l1_items.append(
+            {
+                "participation_id": p.id,
+                "status": p.status,
+                "paid": bool(paid),
+                "created_at": p.created_at.isoformat(),
+                "confirmed_at": p.confirmed_at.isoformat() if p.confirmed_at else None,
+                "user": {
+                    "wallet_address": p.user.wallet_address,
+                    "telegram_id": p.user.telegram_id,
+                    "telegram_username": p.user.telegram_username,
+                },
+            }
+        )
+
+    confirmed_l1 = _confirmed_l1_count(obj)
+    used_slots = _referrer_used_slots(obj)
+    open_payout = (
+        PayoutRequest.objects.filter(user=obj, status__in=[PayoutStatus.REQUESTED, PayoutStatus.APPROVED])
+        .order_by("-created_at")
+        .first()
+    )
+    eligible_payout = bool(active and active.status == ParticipationState.CONFIRMED and confirmed_l1 >= 3 and not open_payout)
+
     return JsonResponse(
         {
             "wallet_address": obj.wallet_address,
@@ -290,6 +467,27 @@ def me(request):
             },
             "author_code": obj.author_code,
             "participation_status": obj.participation_status,
+            "cycle": {
+                "cycle_start": cycle_start.isoformat() if cycle_start else None,
+                "active_participation": (
+                    {
+                        "id": active.id,
+                        "status": active.status,
+                        "created_at": active.created_at.isoformat(),
+                        "confirmed_at": active.confirmed_at.isoformat() if active.confirmed_at else None,
+                    }
+                    if active
+                    else None
+                ),
+                "payout_window_start": payout_window_start.isoformat() if payout_window_start else None,
+            },
+            "referrals": {
+                "slots": {"used": used_slots, "limit": 3},
+                "confirmed_l1": confirmed_l1,
+                "eligible_payout": eligible_payout,
+                "has_open_payout": bool(open_payout),
+                "l1": l1_items,
+            },
             "stats": {
                 "invited_count": obj.invited_count,
                 "paid_count": obj.paid_count,
@@ -361,15 +559,13 @@ def inviter_apply(request):
     if not inviter:
         return JsonResponse({"error": "inviter is required"}, status=400)
 
+    # Referrer is REQUIRED and must be Telegram ID (per business rules).
+    if not inviter.isdigit():
+        return JsonResponse({"error": "referrer_telegram_id must be digits"}, status=400)
     inviter_wallet = None
-    inviter_tg = None
-    if inviter.isdigit():
-        inviter_tg = int(inviter)
-    elif ":" in inviter:
-        inviter_wallet = inviter
-    else:
-        # allow passing @username as MVP "raw" in wallet field for later resolution
-        inviter_wallet = inviter
+    inviter_tg = int(inviter)
+    if user.telegram_id and inviter_tg == int(user.telegram_id):
+        return JsonResponse({"error": "self_referral"}, status=400)
 
     user.inviter_wallet_address = inviter_wallet
     user.inviter_telegram_id = inviter_tg
@@ -484,6 +680,68 @@ def payments_confirm(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+def intent(request):
+    """
+    SSOT: reserve referrer slot (3/3) and create Participation(PENDING).
+    Referrer and author code are REQUIRED.
+    """
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    ref_tid = body.get("referrer_telegram_id")
+    if ref_tid is None:
+        ref_tid = user.inviter_telegram_id
+    try:
+        ref_tid = int(ref_tid)
+    except Exception:
+        return JsonResponse({"error": "referrer_telegram_id is required"}, status=400)
+
+    code = (body.get("author_code") or user.author_code or "").strip()
+    if not code:
+        return JsonResponse({"error": "author_code is required"}, status=400)
+
+    try:
+        with transaction.atomic():
+            part, pay_intent, used_slots = _create_intent(user=user, referrer_telegram_id=ref_tid, author_code=code)
+    except RuntimeError as e:
+        if str(e) == "referrer_limit":
+            return JsonResponse({"error": "referrer_limit", "used_slots": 3}, status=409)
+        raise
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.INTENT_CREATE,
+        payload={"participation_id": part.id, "comment": pay_intent.comment, "amount_nanotons": pay_intent.amount_nanotons},
+    )
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "participation": {"id": part.id, "status": part.status},
+            "referrer": {"telegram_id": ref_tid},
+            "slots": {"used": used_slots, "limit": 3},
+            "payment": {
+                "amount": pay_intent.amount_nanotons,
+                "amount_usd_cents": pay_intent.amount_usd_cents,
+                "receiver": pay_intent.receiver,
+                "comment": pay_intent.comment,
+                "valid_until": pay_intent.valid_until,
+            },
+        }
+    )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
 def participation_create(request):
     """
     SSOT: create Participation(PENDING) and return payment intent to send 15 USDT (MVP uses TON transfer placeholder).
@@ -494,25 +752,33 @@ def participation_create(request):
         return user_or_resp
     user = user_or_resp
 
-    # anti-abuse: allow new participation only when ACTIVE/COMPLETED? (MVP: one at a time unless COMPLETED)
-    if Participation.objects.filter(user=user, status=ParticipationState.PENDING).exists():
-        return JsonResponse({"error": "pending participation exists"}, status=400)
-
+    # Backward-compatible wrapper around /intent.
+    if not user.inviter_telegram_id:
+        return JsonResponse({"error": "referrer_telegram_id is required"}, status=400)
+    if not user.author_code:
+        return JsonResponse({"error": "author_code is required"}, status=400)
     try:
-        intent = create_payment_intent(user)
+        with transaction.atomic():
+            part, pay_intent, used_slots = _create_intent(
+                user=user,
+                referrer_telegram_id=int(user.inviter_telegram_id),
+                author_code=str(user.author_code),
+            )
+    except RuntimeError:
+        return JsonResponse({"error": "referrer_limit"}, status=409)
     except ValueError as e:
         return JsonResponse({"error": str(e)}, status=400)
 
-    Participation.objects.create(user=user, amount_usd_cents=intent.amount_usd_cents, status=ParticipationState.PENDING)
-
     return JsonResponse(
         {
-            "amount": intent.amount_nanotons,
-            "amount_usd_cents": intent.amount_usd_cents,
-            "receiver": intent.receiver,
-            "comment": intent.comment,
-            "valid_until": intent.valid_until,
-            "status": "PENDING",
+            "amount": pay_intent.amount_nanotons,
+            "amount_usd_cents": pay_intent.amount_usd_cents,
+            "receiver": pay_intent.receiver,
+            "comment": pay_intent.comment,
+            "valid_until": pay_intent.valid_until,
+            "status": part.status,
+            "participation_id": part.id,
+            "slots_used": used_slots,
         }
     )
 
@@ -524,7 +790,7 @@ def participation_confirm(request):
     Admin-only: confirm participation (MVP manual).
     Auth via X-Admin-Token env var.
     """
-    admin_token = (os.getenv("ADMIN_TOKEN") or "").strip()
+    admin_token = _admin_secret()
     got = (request.headers.get("X-Admin-Token") or "").strip()
     if not admin_token or got != admin_token:
         return JsonResponse({"error": "forbidden"}, status=403)
@@ -537,6 +803,7 @@ def participation_confirm(request):
     wallet = (body.get("wallet_address") or "").strip()
     decision = (body.get("decision") or "confirm").strip().lower()
     note = (body.get("note") or "").strip()
+    tx_hash = (body.get("tx_hash") or "").strip()
     if not wallet:
         return JsonResponse({"error": "wallet_address is required"}, status=400)
 
@@ -551,19 +818,58 @@ def participation_confirm(request):
     if decision == "reject":
         part.status = ParticipationState.REJECTED
         part.admin_note = note
+        if tx_hash:
+            part.tx_hash = tx_hash
         part.confirmed_at = timezone.now()
-        part.save(update_fields=["status", "admin_note", "confirmed_at"])
+        part.save(update_fields=["status", "admin_note", "tx_hash", "confirmed_at"])
         user.participation_status = ParticipationStatus.NEW
         user.save(update_fields=["participation_status", "updated_at"])
+        EventLog.objects.create(
+            user=user,
+            event_type=EventType.PARTICIPATION_CONFIRM,
+            payload={"decision": "reject", "participation_id": part.id, "tx_hash": tx_hash or None, "note": note},
+        )
         return JsonResponse({"ok": True, "status": "REJECTED"})
+
+    # confirm
+    if tx_hash:
+        dup = (
+            Participation.objects.exclude(id=part.id)
+            .filter(tx_hash=tx_hash, status__in=[ParticipationState.PENDING, ParticipationState.CONFIRMED])
+            .exists()
+        )
+        if dup:
+            EventLog.objects.create(
+                user=user,
+                event_type=EventType.PARTICIPATION_CONFIRM,
+                payload={"decision": "confirm", "error": "dup_tx", "tx_hash": tx_hash, "participation_id": part.id},
+            )
+            return JsonResponse({"error": "dup_tx"}, status=400)
 
     part.status = ParticipationState.CONFIRMED
     part.admin_note = note
+    if tx_hash:
+        part.tx_hash = tx_hash
     part.confirmed_at = timezone.now()
-    part.save(update_fields=["status", "admin_note", "confirmed_at"])
+    part.save(update_fields=["status", "admin_note", "tx_hash", "confirmed_at"])
 
     user.participation_status = ParticipationStatus.ACTIVE
     user.save(update_fields=["participation_status", "updated_at"])
+
+    # Update referrer stats (for UI only; SSOT remains Participation)
+    if part.referrer_id:
+        try:
+            ref = UserProfile.objects.get(id=part.referrer_id)
+            ref.paid_count = int(ref.paid_count or 0) + 1
+            ref.save(update_fields=["paid_count", "updated_at"])
+        except Exception:
+            pass
+
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.PARTICIPATION_CONFIRM,
+        payload={"decision": "confirm", "participation_id": part.id, "tx_hash": tx_hash or None, "note": note},
+    )
     return JsonResponse({"ok": True, "status": "CONFIRMED"})
 
 
@@ -575,25 +881,163 @@ def referrals_l1(request):
         return user_or_resp
     user = user_or_resp
 
-    qs = UserProfile.objects.none()
-    if user.telegram_id:
-        qs = qs | UserProfile.objects.filter(inviter_telegram_id=user.telegram_id)
-    qs = qs | UserProfile.objects.filter(inviter_wallet_address=user.wallet_address)
-    qs = qs.order_by("-created_at")[:200]
+    cycle_start = _cycle_start_dt(user)
+    active = _active_participation(user)
+    payout_window_start = active.created_at if active else None
 
+    qs = (
+        Participation.objects.filter(referrer=user, created_at__gt=cycle_start)
+        .select_related("user")
+        .order_by("-created_at")[:200]
+    )
+
+    items = []
+    for p in qs:
+        paid = p.status == ParticipationState.CONFIRMED and (payout_window_start is not None and p.created_at > payout_window_start)
+        items.append(
+            {
+                "participation_id": p.id,
+                "status": p.status,
+                "paid": bool(paid),
+                "created_at": p.created_at.isoformat(),
+                "confirmed_at": p.confirmed_at.isoformat() if p.confirmed_at else None,
+                "user": {
+                    "wallet_address": p.user.wallet_address,
+                    "telegram_id": p.user.telegram_id,
+                    "telegram_username": p.user.telegram_username,
+                    "participation_status": p.user.participation_status,
+                },
+            }
+        )
+
+    return JsonResponse({"items": items, "slots": {"used": _referrer_used_slots(user), "limit": 3}})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payout_request(request):
+    """
+    Create payout request (33 USDT stub) when user has:
+    - active participation CONFIRMED
+    - 3 L1 confirmed after active participation start
+    - no open payout request
+    """
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    active = _active_participation(user)
+    if not active or active.status != ParticipationState.CONFIRMED:
+        return JsonResponse({"error": "participation_not_confirmed"}, status=400)
+
+    confirmed_l1 = _confirmed_l1_count(user)
+    if confirmed_l1 < 3:
+        return JsonResponse({"error": "not_eligible", "confirmed_l1": confirmed_l1}, status=400)
+
+    open_payout = PayoutRequest.objects.filter(user=user, status__in=[PayoutStatus.REQUESTED, PayoutStatus.APPROVED]).exists()
+    if open_payout:
+        return JsonResponse({"error": "payout_already_requested"}, status=409)
+
+    pr = PayoutRequest.objects.create(
+        user=user,
+        amount_points=0,
+        amount_usd_cents=3300,
+        status=PayoutStatus.REQUESTED,
+    )
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.PAYOUT_REQUEST,
+        payload={"payout_request_id": pr.id, "amount_usd_cents": pr.amount_usd_cents},
+    )
+    return JsonResponse({"ok": True, "status": pr.status, "payout_request_id": pr.id})
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def payout_me(request):
+    user_or_resp = require_user_or_401(request)
+    if isinstance(user_or_resp, JsonResponse):
+        return user_or_resp
+    user = user_or_resp
+
+    qs = PayoutRequest.objects.filter(user=user).order_by("-created_at")[:50]
     return JsonResponse(
         {
             "items": [
                 {
-                    "wallet_address": u.wallet_address,
-                    "telegram_id": u.telegram_id,
-                    "telegram_username": u.telegram_username,
-                    "participation_status": u.participation_status,
-                    "created_at": u.created_at.isoformat(),
+                    "id": p.id,
+                    "status": p.status,
+                    "tx_hash": p.tx_hash,
+                    "amount_usd_cents": p.amount_usd_cents,
+                    "created_at": p.created_at.isoformat(),
+                    "updated_at": p.updated_at.isoformat(),
                 }
-                for u in qs
+                for p in qs
             ]
         }
     )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payout_mark(request):
+    """
+    Admin-only: mark payout as SENT (we map to PayoutStatus.PAID) and close user's cycle.
+    """
+    admin_token = _admin_secret()
+    got = (request.headers.get("X-Admin-Token") or "").strip()
+    if not admin_token or got != admin_token:
+        return JsonResponse({"error": "forbidden"}, status=403)
+
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid json"}, status=400)
+
+    wallet = (body.get("wallet_address") or "").strip()
+    decision = (body.get("decision") or "sent").strip().lower()
+    tx_hash = (body.get("tx_hash") or "").strip()
+    note = (body.get("note") or "").strip()
+    if not wallet:
+        return JsonResponse({"error": "wallet_address is required"}, status=400)
+
+    user = UserProfile.objects.filter(wallet_address=wallet).first()
+    if not user:
+        return JsonResponse({"error": "user not found"}, status=404)
+
+    pr = (
+        PayoutRequest.objects.filter(user=user, status__in=[PayoutStatus.REQUESTED, PayoutStatus.APPROVED])
+        .order_by("-created_at")
+        .first()
+    )
+    if not pr:
+        return JsonResponse({"error": "no open payout request"}, status=400)
+
+    if decision == "reject":
+        pr.status = PayoutStatus.REJECTED
+        pr.admin_note = note
+        pr.save(update_fields=["status", "admin_note", "updated_at"])
+        EventLog.objects.create(user=user, event_type=EventType.PAYOUT_MARK, payload={"decision": "reject", "payout_request_id": pr.id})
+        return JsonResponse({"ok": True, "status": pr.status})
+
+    if not tx_hash:
+        return JsonResponse({"error": "tx_hash is required"}, status=400)
+
+    pr.status = PayoutStatus.PAID  # SENT
+    pr.tx_hash = tx_hash
+    pr.admin_note = note
+    pr.save(update_fields=["status", "tx_hash", "admin_note", "updated_at"])
+
+    user.participation_status = ParticipationStatus.COMPLETED
+    user.payouts_count = int(user.payouts_count or 0) + 1
+    user.save(update_fields=["participation_status", "payouts_count", "updated_at"])
+
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.PAYOUT_MARK,
+        payload={"decision": "sent", "payout_request_id": pr.id, "tx_hash": tx_hash},
+    )
+    return JsonResponse({"ok": True, "status": pr.status})
 
 

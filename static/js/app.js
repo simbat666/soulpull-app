@@ -381,7 +381,7 @@
           : '—';
       }
       if (inviterInfoEl) {
-        inviterInfoEl.textContent = u.inviter?.wallet_address || (u.inviter?.telegram_id ? String(u.inviter.telegram_id) : '—');
+        inviterInfoEl.textContent = u.inviter?.telegram_id ? String(u.inviter.telegram_id) : '—';
       }
       if (authorCodeInfoEl) authorCodeInfoEl.textContent = u.author_code || '—';
 
@@ -394,7 +394,12 @@
       if (cabStatusEl) cabStatusEl.textContent = status;
       if (cabStatsEl) {
         const s = u.stats || {};
-        cabStatsEl.textContent = `invited=${s.invited_count || 0}, paid=${s.paid_count || 0}, payouts=${s.payouts_count || 0}, points=${s.points || 0}`;
+        const r = u.referrals || {};
+        const slots = r.slots || {};
+        const eligible = r.eligible_payout ? 'yes' : 'no';
+        cabStatsEl.textContent =
+          `invited=${s.invited_count || 0}, paid=${s.paid_count || 0}, payouts=${s.payouts_count || 0}, points=${s.points || 0}` +
+          ` | slots=${slots.used ?? '—'}/${slots.limit ?? '—'}, l1_confirmed=${r.confirmed_l1 ?? '—'}, payout_ok=${eligible}`;
       }
 
       if (status === 'ACTIVE') {
@@ -405,7 +410,11 @@
         setStatus('logged in');
       }
 
-      if (btnPayCreate) btnPayCreate.disabled = false;
+      // Payment/intent gating (business rules): Telegram + referrer + author code are required
+      const hasTg = !!u.telegram?.id;
+      const hasReferrer = !!u.inviter?.telegram_id;
+      const hasCode = !!u.author_code;
+      if (btnPayCreate) btnPayCreate.disabled = !(hasTg && hasReferrer && hasCode);
     }
 
     async function prepareTonProof() {
@@ -521,7 +530,8 @@
       btnInviterApply.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
         const v = (inviterInput?.value || '').trim();
-        if (!v) return setStatus('Ошибка: inviter пустой');
+        if (!v) return setStatus('Ошибка: referrer пустой');
+        if (!/^\d+$/.test(v)) return setStatus('Ошибка: нужен telegram_id (только цифры)');
         setStatus('saving inviter…');
         try {
           await postWithBearer('/inviter/apply', currentToken, { inviter: v });
@@ -556,18 +566,26 @@
     if (btnPayCreate) {
       btnPayCreate.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
+        // enforce required inputs
+        if (!currentProfile?.telegram?.id) return setStatus('Ошибка: сначала привяжите Telegram');
+        if (!currentProfile?.inviter?.telegram_id) return setStatus('Ошибка: укажите кто пригласил (telegram_id)');
+        if (!currentProfile?.author_code) return setStatus('Ошибка: введите код автора');
         setStatus('creating payment…');
         try {
           // SSOT: create Participation(PENDING) + payment intent in one step
           lastPaymentIntent = await postWithBearer('/participation/create', currentToken, {});
           if (paymentInfo) {
             const ton = Number(lastPaymentIntent.amount || '0') / 1e9;
-            paymentInfo.textContent = `receiver: ${lastPaymentIntent.receiver}, amount: ${ton} TON, valid_until: ${lastPaymentIntent.valid_until}, comment: ${lastPaymentIntent.comment}`;
+            const pid = lastPaymentIntent.participation_id ? `, participation_id: ${lastPaymentIntent.participation_id}` : '';
+            const slots = lastPaymentIntent.slots_used != null ? `, slots_used: ${lastPaymentIntent.slots_used}/3` : '';
+            paymentInfo.textContent = `receiver: ${lastPaymentIntent.receiver}, amount: ${ton} TON, valid_until: ${lastPaymentIntent.valid_until}, comment: ${lastPaymentIntent.comment}${pid}${slots}`;
           }
           if (btnPaySend) show(btnPaySend);
           setStatus('payment created');
         } catch (e) {
-          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'payment create error'}`);
+          // Surface 409 referrer_limit nicely if backend returns it as error string
+          const msg = e instanceof Error ? e.message : 'payment create error';
+          setStatus(`Ошибка: ${msg}`);
         }
       });
     }

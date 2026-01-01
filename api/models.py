@@ -119,6 +119,9 @@ class PayoutRequest(models.Model):
     user = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name="payout_requests")
     amount_points = models.IntegerField()
     status = models.CharField(max_length=16, choices=PayoutStatus.choices, default=PayoutStatus.REQUESTED, db_index=True)
+    # MVP payout stub: admin can mark SENT/PAID by providing tx hash (later: real on-chain)
+    tx_hash = models.CharField(max_length=128, null=True, blank=True, db_index=True)
+    amount_usd_cents = models.IntegerField(default=3300)
     admin_note = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -138,6 +141,10 @@ class EventType(models.TextChoices):
     INVITER_SET = "inviter_set", "inviter_set"
     PAYMENT_CREATE = "payment_create", "payment_create"
     PAYMENT_CONFIRM = "payment_confirm", "payment_confirm"
+    INTENT_CREATE = "intent_create", "intent_create"
+    PARTICIPATION_CONFIRM = "participation_confirm", "participation_confirm"
+    PAYOUT_REQUEST = "payout_request", "payout_request"
+    PAYOUT_MARK = "payout_mark", "payout_mark"
 
 
 class EventLog(models.Model):
@@ -174,6 +181,16 @@ class ParticipationState(models.TextChoices):
 
 class Participation(models.Model):
     user = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name="participations")
+    # Referral SSOT: referrer is fixed at intent creation (before payment)
+    referrer = models.ForeignKey(
+        UserProfile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="referrals",
+    )
+    # Snapshot of author code used for this participation (required by business rules)
+    author_code = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     amount_usd_cents = models.IntegerField(default=1500)
     tx_hash = models.CharField(max_length=128, null=True, blank=True, db_index=True)
     status = models.CharField(max_length=16, choices=ParticipationState.choices, default=ParticipationState.PENDING, db_index=True)
@@ -185,6 +202,8 @@ class Participation(models.Model):
         db_table = "participations"
         indexes = [
             models.Index(fields=["user", "status"]),
+            models.Index(fields=["referrer", "status"]),
+            models.Index(fields=["referrer", "created_at"]),
         ]
 
 
