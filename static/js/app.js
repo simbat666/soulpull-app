@@ -71,6 +71,19 @@
     if (toastEl) toastEl.textContent = text;
   }
 
+  function humanizeApiErrorMessage(msg) {
+    const m = String(msg || '').trim();
+    if (!m) return 'неизвестная ошибка';
+    if (m === 'unauthorized' || m.includes('failed: 401')) return 'нет авторизации: подключите кошелёк и заново войдите (TonConnect + tonProof)';
+    if (m.includes('failed: 403') || m === 'forbidden') return 'доступ запрещён (403)';
+    if (m.includes('referrer_telegram_id must be digits')) return 'реферер должен быть telegram_id (только цифры), не @username и не адрес кошелька';
+    if (m.includes('self_referral')) return 'нельзя указать себя как реферера';
+    if (m.includes('inviter can not be changed after activation')) return 'реферера нельзя менять после активации';
+    if (m.includes('author_code already applied')) return 'код автора уже применён (повторно нельзя)';
+    if (m.includes('referrer_limit')) return 'у этого реферера закончились слоты (лимит 3/3)';
+    return m;
+  }
+
   function setAddress(text) {
     if (addrEl) addrEl.textContent = text || '';
   }
@@ -717,7 +730,10 @@
         if (!currentToken) return setStatus('Ошибка: нет токена');
         const v = (inviterInput?.value || '').trim();
         if (!v) return setStatus('Ошибка: referrer пустой');
-        if (!/^\d+$/.test(v)) return setStatus('Ошибка: нужен telegram_id (только цифры)');
+        if (!/^\d+$/.test(v)) {
+          if (v.startsWith('@')) return setStatus('Ошибка: нужен telegram_id (цифры), а не @username');
+          return setStatus('Ошибка: нужен telegram_id (только цифры)');
+        }
         setStatus('saving inviter…');
         try {
           await postWithBearer('/inviter/apply', currentToken, { inviter: v });
@@ -726,7 +742,8 @@
           renderProfile(u);
           setStatus('inviter saved');
         } catch (e) {
-          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'inviter error'}`);
+          const raw = e instanceof Error ? e.message : 'inviter error';
+          setStatus(`Ошибка: ${humanizeApiErrorMessage(raw)}`);
         }
       });
     }
@@ -744,7 +761,8 @@
           renderProfile(u);
           setStatus('author code applied');
         } catch (e) {
-          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'author code error'}`);
+          const raw = e instanceof Error ? e.message : 'author code error';
+          setStatus(`Ошибка: ${humanizeApiErrorMessage(raw)}`);
         }
       });
     }
@@ -778,7 +796,7 @@
         } catch (e) {
           // Surface 409 referrer_limit nicely if backend returns it as error string
           const msg = e instanceof Error ? e.message : 'payment create error';
-          setStatus(`Ошибка: ${msg}`);
+          setStatus(`Ошибка: ${humanizeApiErrorMessage(msg)}`);
         }
       });
     }
