@@ -30,7 +30,8 @@
   const cabStatusEl = el('cab-status');
   const cabStatsEl = el('cab-stats');
 
-  const btnTelegramVerify = el('btn-telegram-verify');
+  // Telegram is linked automatically via initData (Telegram WebApp). No manual button.
+  const btnTelegramVerify = null;
   const inviterInput = el('inviter-input');
   const btnInviterApply = el('btn-inviter-apply');
   const authorCodeInput = el('author-code-input');
@@ -233,7 +234,7 @@
       }
       show(tgWarningEl);
     }
-    if (btnTelegramVerify) btnTelegramVerify.disabled = !hasInitData;
+    // No manual link button: rely on tgWarning text + auto-link when initData exists.
   }
 
   function setupTelegramUI() {
@@ -413,21 +414,14 @@
       if (!initData) return;
 
       try {
-        if (btnTelegramVerify) {
-          btnTelegramVerify.disabled = true;
-          btnTelegramVerify.textContent = 'Привязка Telegram…';
-        }
+        // No manual button: just auto-link silently.
         await postWithBearer('/telegram/verify', currentToken, { initData });
         const u = await me(currentToken);
         currentProfile = u;
         renderProfile(u);
         setStatus('telegram linked');
       } catch (e) {
-        // Leave a manual fallback button if auto-link failed.
-        if (btnTelegramVerify) {
-          btnTelegramVerify.disabled = false;
-          btnTelegramVerify.textContent = 'Привязать Telegram';
-        }
+        // Keep silent; user will see missing TG in checklist and the warning.
       }
     }
 
@@ -484,6 +478,9 @@
     function renderProfile(u) {
       if (!u) return;
       const wa = u.wallet_address || '';
+      // Sometimes we render from token (/me) before TonConnect status callback updates `currentWalletAddress`.
+      // Keep them in sync so checklist doesn't show "—" while wallet is effectively connected.
+      if (!currentWalletAddress && wa) currentWalletAddress = wa;
       setAddress(wa);
       if (telegramInfoEl) {
         telegramInfoEl.textContent = u.telegram?.username
@@ -532,21 +529,11 @@
       // We still enforce rules inside the click handler with a clear status message.
       if (btnPayCreate) btnPayCreate.disabled = false;
 
-      // Telegram button UX: hide/disable when already linked.
-      if (btnTelegramVerify) {
-        if (hasTg) {
-          btnTelegramVerify.disabled = true;
-          btnTelegramVerify.textContent = 'Telegram привязан';
-        } else {
-          // Keep enabled only if initData exists (or will be auto-linked soon)
-          const initData = getTelegramInitData(getTelegramWebApp());
-          btnTelegramVerify.disabled = !initData;
-          btnTelegramVerify.textContent = 'Привязать Telegram';
-        }
-      }
+      // Telegram is linked automatically. If initData missing, UI shows warning.
 
       // Checklist / next action
-      setTag(chkWalletEl, !!currentWalletAddress, currentWalletAddress ? 'OK' : 'нет');
+      const walletOk = !!(currentWalletAddress || wa);
+      setTag(chkWalletEl, walletOk, walletOk ? 'OK' : 'нет');
       setTag(chkTelegramEl, hasTg, hasTg ? 'OK' : 'нужно');
       setTag(chkReferrerEl, hasReferrer, hasReferrer ? 'OK' : 'нужно');
       setTag(chkCodeEl, hasCode, hasCode ? 'OK' : 'нужно');
@@ -564,8 +551,14 @@
           action = () => btnOpenTonconnect?.click();
           hint = 'Шаг 1: подключите кошелёк через TonConnect (Tonkeeper).';
         } else if (!hasTg) {
-          action = () => btnTelegramVerify?.click();
-          hint = 'Шаг 2: нажмите «Привязать Telegram».';
+          const initData = getTelegramInitData(getTelegramWebApp());
+          if (!initData) {
+            action = () => setStatus('Откройте приложение через Telegram WebApp (из бота), чтобы подтянуть Telegram initData.');
+            hint = 'Шаг 2: откройте через Telegram WebApp (из бота), чтобы можно было привязать Telegram автоматически.';
+          } else {
+            action = () => setStatus('Telegram initData найден. Привязка выполнится автоматически после входа.');
+            hint = 'Шаг 2: дождитесь автопривязки Telegram (она происходит автоматически).';
+          }
         } else if (!hasReferrer) {
           action = () => inviterInput?.focus();
           hint = 'Шаг 3: введите telegram_id пригласившего и нажмите «Сохранить».';
@@ -706,24 +699,7 @@
     })();
 
     // UI actions
-    if (btnTelegramVerify) {
-      btnTelegramVerify.addEventListener('click', async () => {
-        if (!currentToken) return setStatus('Ошибка: нет токена');
-        const tg2 = getTelegramWebApp();
-        const initData = getTelegramInitData(tg2);
-        if (!initData) return setStatus('Ошибка: Telegram initData отсутствует');
-        setStatus('telegram verify…');
-        try {
-          await postWithBearer('/telegram/verify', currentToken, { initData });
-          const u = await me(currentToken);
-          currentProfile = u;
-          renderProfile(u);
-          setStatus('telegram linked');
-        } catch (e) {
-          setStatus(`Ошибка: ${e instanceof Error ? e.message : 'telegram verify error'}`);
-        }
-      });
-    }
+    // No manual Telegram verify button.
 
     if (btnInviterApply) {
       btnInviterApply.addEventListener('click', async () => {

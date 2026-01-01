@@ -144,7 +144,6 @@ def index(request):
                   <div class="card__title">Telegram WebApp</div>
                   <div class="card__desc">Привязка профиля Telegram к кошельку.</div>
                 </div>
-                <button id="btn-telegram-verify" class="btn btn-indigo">Привязать Telegram</button>
               </div>
 
               <div class="card">
