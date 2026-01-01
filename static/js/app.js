@@ -1,7 +1,7 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
-  const UI_BUILD = 'ui-20260101-9';
+  const UI_BUILD = 'ui-20260101-10';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -379,6 +379,16 @@
     let tokenRefreshPromise = null;
     let tokenChecked = false;
 
+    function debugTonConnectStorage() {
+      try {
+        const keys = Object.keys(localStorage || {});
+        const tonKeys = keys.filter((k) => /ton|tonconnect/i.test(k));
+        return tonKeys.length ? `storage:${tonKeys.length}` : 'storage:empty';
+      } catch (_) {
+        return 'storage:na';
+      }
+    }
+
     async function maybeAutoTelegramVerify(profile) {
       // If TG initData exists and profile isn't linked yet -> auto-link (no manual click).
       if (!currentToken) return;
@@ -568,14 +578,14 @@
         if (!address) {
           currentWalletAddress = null;
           setAddress('');
-          setStatus('wallet disconnected');
+          setStatus(`wallet disconnected (${debugTonConnectStorage()})`);
           showScreen('connect');
           return;
         }
 
         currentWalletAddress = address;
         setAddress(address);
-        setStatus('wallet connected');
+        setStatus(`wallet connected (${debugTonConnectStorage()})`);
         showScreen('onboarding');
         if (currentProfile) renderProfile(currentProfile);
 
@@ -625,6 +635,32 @@
         setStatus(`Ошибка: ${e instanceof Error ? e.message : 'unknown error'}`);
       }
     });
+
+    // Explicit restore (some WebViews require awaiting it to reflect UI state)
+    (async () => {
+      try {
+        if (tonConnectUI && tonConnectUI.connectionRestored && typeof tonConnectUI.connectionRestored.then === 'function') {
+          await tonConnectUI.connectionRestored;
+        } else if (tonConnectUI && typeof tonConnectUI.restoreConnection === 'function') {
+          await tonConnectUI.restoreConnection();
+        }
+      } catch (_) {
+        // ignore
+      }
+      try {
+        const w = tonConnectUI?.wallet || tonConnectUI?.connectedWallet;
+        const addr = w?.account?.address;
+        if (addr && !currentWalletAddress) {
+          currentWalletAddress = addr;
+          setAddress(addr);
+          setStatus(`wallet restored (${debugTonConnectStorage()})`);
+          showScreen('onboarding');
+          if (currentProfile) renderProfile(currentProfile);
+        }
+      } catch (_) {
+        // ignore
+      }
+    })();
 
     // UI actions
     if (btnTelegramVerify) {
