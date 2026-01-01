@@ -60,8 +60,30 @@
     elm.classList.add('hidden');
   }
 
-  function renderTelegramUserFromWebApp() {
-    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  function getTelegramWebApp() {
+    return window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  }
+
+  function parseTelegramUserFromInitData(initData) {
+    try {
+      const sp = new URLSearchParams(String(initData || ''));
+      const raw = sp.get('user');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function extractTelegramUser(tg) {
+    if (!tg) return null;
+    const u1 = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+    if (u1) return u1;
+    if (tg.initData) return parseTelegramUserFromInitData(tg.initData);
+    return null;
+  }
+
+  function renderTelegramUserFromWebApp(tg) {
     if (!tg) {
       hide(tgUserEl);
       return null;
@@ -74,9 +96,17 @@
       // ignore
     }
 
-    const u = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user : null;
+    const u = extractTelegramUser(tg);
     if (!u) {
-      hide(tgUserEl);
+      // We are inside Telegram WebApp, but user data is not available.
+      // Show a small badge so it's obvious the page sees Telegram, but initData/user is missing.
+      if (tgUserNameEl) tgUserNameEl.textContent = 'Telegram WebApp';
+      if (tgUserUsernameEl) tgUserUsernameEl.textContent = 'initData/user missing';
+      if (tgUserAvatarEl) {
+        tgUserAvatarEl.removeAttribute('src');
+        tgUserAvatarEl.classList.add('hidden');
+      }
+      show(tgUserEl);
       return null;
     }
 
@@ -99,6 +129,35 @@
 
     show(tgUserEl);
     return u;
+  }
+
+  function updateTelegramAvailabilityUI(tg) {
+    const hasWebApp = !!tg;
+    const hasInitData = !!(tg && tg.initData);
+    if (hasWebApp) hide(tgWarningEl);
+    else show(tgWarningEl);
+    if (btnTelegramVerify) btnTelegramVerify.disabled = !hasInitData;
+  }
+
+  function setupTelegramUI() {
+    // Telegram Desktop sometimes injects WebApp a bit later than DOMContentLoaded.
+    // Retry a few times to avoid false negatives (warning shown + no user badge).
+    let tries = 0;
+    const maxTries = 10;
+    const delayMs = 250;
+
+    const tick = () => {
+      const tg = getTelegramWebApp();
+      updateTelegramAvailabilityUI(tg);
+      renderTelegramUserFromWebApp(tg);
+
+      // Stop when we have WebApp or we exhausted retries.
+      if (tg || tries >= maxTries) return;
+      tries += 1;
+      setTimeout(tick, delayMs);
+    };
+
+    tick();
   }
 
   function showScreen(which) {
@@ -215,13 +274,8 @@
 
     // Telegram is optional for now (we'll enforce later).
     // 1) Render TG user badge (name/@username/photo) automatically when opened inside Telegram WebApp.
-    renderTelegramUserFromWebApp();
-
     // 2) Show/hide warning & enable/disable link button based on TG availability.
-    const hasTelegram = !!(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData);
-    if (hasTelegram) hide(tgWarningEl);
-    else show(tgWarningEl);
-    if (btnTelegramVerify) btnTelegramVerify.disabled = !hasTelegram;
+    setupTelegramUI();
 
     setStatus('init');
     setAddress('');
