@@ -112,36 +112,6 @@ class TonProofFlowTests(TestCase):
 
     def test_payments_create_requires_env(self):
         token = self._login_and_get_token()
-        # SSOT: payments require telegram + inviter
-        bot_token = "123:TEST_BOT_TOKEN"
-        os.environ["TELEGRAM_BOT_TOKEN"] = bot_token
-
-        user_obj = {"id": 777, "username": "testuser", "first_name": "Test"}
-        data = {
-            "auth_date": str(int(time.time())),
-            "query_id": "AAE",
-            "user": json.dumps(user_obj),
-        }
-        data_check = "\n".join([f"{k}={v}" for k, v in sorted(data.items())]).encode("utf-8")
-        secret_key = hashlib.sha256(bot_token.encode("utf-8")).digest()
-        data["hash"] = hmac.new(secret_key, data_check, hashlib.sha256).hexdigest()
-        init_data = urlencode(data)
-        r_tg = self.client.post(
-            "/api/v1/telegram/verify",
-            data=json.dumps({"initData": init_data}),
-            content_type="application/json",
-            **{"HTTP_AUTHORIZATION": f"Bearer {token}"},
-        )
-        self.assertEqual(r_tg.status_code, 200, r_tg.content)
-
-        r_inv = self.client.post(
-            "/api/v1/inviter/apply",
-            data=json.dumps({"inviter": "123456"}),
-            content_type="application/json",
-            **{"HTTP_AUTHORIZATION": f"Bearer {token}"},
-        )
-        self.assertEqual(r_inv.status_code, 200, r_inv.content)
-
         if "RECEIVER_WALLET" in os.environ:
             del os.environ["RECEIVER_WALLET"]
         r = self.client.post(

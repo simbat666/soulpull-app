@@ -1,7 +1,6 @@
 (() => {
   const API_BASE = window.location.origin + '/api/v1';
   const TOKEN_KEY = 'soulpull_token';
-  const INVITER_KEY = 'soulpull_pending_inviter';
 
   const el = (id) => document.getElementById(id);
   const statusEl = el('status');
@@ -169,40 +168,9 @@
       return;
     }
 
-    // Telegram gate (SSOT):
-    // - If NOT in Telegram at all -> block everything (no TonConnect init).
-    // - If in Telegram but initData is missing/empty (sometimes on Desktop/WebView) -> allow TonConnect,
-    //   but disable Telegram binding + payments until reopened properly via the bot WebApp button.
-    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-    const isTelegram = !!tg;
-    const hasInitData = !!(tg && tg.initData && String(tg.initData).length > 0);
-
-    if (!isTelegram) {
-      show(tgWarningEl);
-      if (btnTelegramVerify) btnTelegramVerify.disabled = true;
-      showScreen('connect');
-      setStatus('Откройте через Telegram WebApp');
-      return;
-    }
-
-    // Inside Telegram: show warning only when initData is missing (cannot bind Telegram).
-    if (!hasInitData) {
-      show(tgWarningEl);
-      if (btnTelegramVerify) btnTelegramVerify.disabled = true;
-      setStatus('Telegram initData отсутствует — откройте WebApp через кнопку бота');
-    } else {
-      hide(tgWarningEl);
-      if (btnTelegramVerify) btnTelegramVerify.disabled = false;
-    }
-
-    // capture ?ref=... once
-    try {
-      const params = new URLSearchParams(window.location.search || '');
-      const ref = (params.get('ref') || '').trim();
-      if (ref) localStorage.setItem(INVITER_KEY, ref);
-    } catch (_) {
-      // ignore
-    }
+    // Telegram is optional for now (we'll enforce later). Hide warning by default.
+    hide(tgWarningEl);
+    if (btnTelegramVerify) btnTelegramVerify.disabled = false;
 
     setStatus('init');
     setAddress('');
@@ -271,25 +239,7 @@
         setStatus('logged in');
       }
 
-      // SSOT: inviter is mandatory before participation/payment.
-      const inviterOk = !!u.inviter?.set_at;
-      if (btnPayCreate) btnPayCreate.disabled = !inviterOk;
-      if (!inviterOk) setStatus('Нужно указать inviter (обязательно)');
-    }
-
-    async function applyPendingInviterIfAny() {
-      if (!currentToken || !currentProfile) return;
-      if (currentProfile.inviter?.set_at) return;
-      const pending = localStorage.getItem(INVITER_KEY);
-      if (!pending) return;
-      try {
-        await postWithBearer('/inviter/apply', currentToken, { inviter: pending });
-        const u = await me(currentToken);
-        currentProfile = u;
-        renderProfile(u);
-      } catch (_) {
-        // ignore
-      }
+      if (btnPayCreate) btnPayCreate.disabled = false;
     }
 
     async function prepareTonProof() {
@@ -312,7 +262,6 @@
     refreshMeFromToken().finally(() => {
       // 2) Always prepare tonProof for the next connect attempt (fresh payload, 5m TTL).
       prepareTonProof();
-      applyPendingInviterIfAny();
     });
 
     tonConnectUI.onStatusChange(async (wallet) => {
@@ -379,7 +328,7 @@
       btnTelegramVerify.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
         const tg2 = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-        if (!tg2 || !tg2.initData) return setStatus('Ошибка: откройте через Telegram');
+        if (!tg2 || !tg2.initData) return setStatus('Ошибка: Telegram initData отсутствует');
         setStatus('telegram verify…');
         try {
           await postWithBearer('/telegram/verify', currentToken, { initData: tg2.initData });
@@ -433,7 +382,6 @@
     if (btnPayCreate) {
       btnPayCreate.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
-        if (!currentProfile?.inviter?.set_at) return setStatus('Ошибка: inviter обязателен');
         setStatus('creating payment…');
         try {
           // SSOT: create Participation(PENDING) + payment intent in one step
@@ -469,7 +417,6 @@
     if (btnPayConfirm) {
       btnPayConfirm.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
-        if (!currentProfile?.inviter?.set_at) return setStatus('Ошибка: inviter обязателен');
         const tx = (txHashInput?.value || '').trim();
         if (!tx) return setStatus('Ошибка: tx_hash пустой');
         setStatus('confirming payment…');

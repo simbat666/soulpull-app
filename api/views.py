@@ -404,20 +404,23 @@ def author_code_apply(request):
     if not code:
         return JsonResponse({"error": "code is required"}, status=400)
 
-    ac = AuthorCode.objects.filter(code=code, active=True).select_related("owner").first()
-    if not ac:
-        return JsonResponse({"error": "invalid author code"}, status=400)
-
     user.author_code = code
     user.author_code_applied_at = timezone.now()
-    user.points = int(user.points or 0) + 10
-    user.save(update_fields=["author_code", "author_code_applied_at", "points", "updated_at"])
+    user.save(update_fields=["author_code", "author_code_applied_at", "updated_at"])
 
-    # Author gets points immediately (USDT obligation handled on confirm later; MVP only tracks points)
-    ac.owner.points = int(ac.owner.points or 0) + 10
-    ac.owner.save(update_fields=["points", "updated_at"])
+    # If code exists in registry, award points (optional). Unknown codes are still stored.
+    ac = AuthorCode.objects.filter(code=code, active=True).select_related("owner").first()
+    if ac:
+        user.points = int(user.points or 0) + 10
+        user.save(update_fields=["points", "updated_at"])
+        ac.owner.points = int(ac.owner.points or 0) + 10
+        ac.owner.save(update_fields=["points", "updated_at"])
 
-    EventLog.objects.create(user=user, event_type=EventType.APPLY_CODE, payload={"code": code, "author_wallet": ac.owner.wallet_address})
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.APPLY_CODE,
+        payload={"code": code, "known": bool(ac), "author_wallet": ac.owner.wallet_address if ac else None},
+    )
     return JsonResponse({"ok": True})
 
 
@@ -428,12 +431,6 @@ def payments_create(request):
     if isinstance(user_or_resp, JsonResponse):
         return user_or_resp
     user = user_or_resp
-
-    # SSOT: app works only in Telegram + inviter required before participation/payment
-    if not user.telegram_id:
-        return JsonResponse({"error": "telegram required"}, status=400)
-    if not user.inviter_set_at:
-        return JsonResponse({"error": "inviter required"}, status=400)
 
     try:
         intent = create_payment_intent(user)
@@ -464,11 +461,6 @@ def payments_confirm(request):
     if isinstance(user_or_resp, JsonResponse):
         return user_or_resp
     user = user_or_resp
-
-    if not user.telegram_id:
-        return JsonResponse({"error": "telegram required"}, status=400)
-    if not user.inviter_set_at:
-        return JsonResponse({"error": "inviter required"}, status=400)
 
     try:
         body = json.loads(request.body or b"{}")
@@ -501,11 +493,6 @@ def participation_create(request):
     if isinstance(user_or_resp, JsonResponse):
         return user_or_resp
     user = user_or_resp
-
-    if not user.telegram_id:
-        return JsonResponse({"error": "telegram required"}, status=400)
-    if not user.inviter_set_at:
-        return JsonResponse({"error": "inviter required"}, status=400)
 
     # anti-abuse: allow new participation only when ACTIVE/COMPLETED? (MVP: one at a time unless COMPLETED)
     if Participation.objects.filter(user=user, status=ParticipationState.PENDING).exists():
