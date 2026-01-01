@@ -969,10 +969,10 @@
                 .join('')
             : '<span class="muted">—</span>');
       }
+    }
 
     if (btnRefresh) {
       btnRefresh.addEventListener('click', refreshAll);
-    }
     }
 
     async function refreshAdmin() {
