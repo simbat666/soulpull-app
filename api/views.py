@@ -294,6 +294,37 @@ def health(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+def debug_login(request):
+    """
+    TEST_MODE only: login by wallet_address without tonProof (for quick testing).
+    """
+    test_mode = os.getenv("TEST_MODE", "").strip().lower() in ("1", "true", "yes")
+    if not test_mode:
+        return JsonResponse({"error": "TEST_MODE not enabled"}, status=403)
+    
+    try:
+        body = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid json"}, status=400)
+    
+    wallet_address = (body.get("wallet_address") or "").strip()
+    if not wallet_address:
+        return JsonResponse({"error": "wallet_address is required"}, status=400)
+    
+    user, _ = UserProfile.objects.get_or_create(wallet_address=wallet_address)
+    token = issue_token(secret=_auth_secret(), wallet_address=user.wallet_address, ttl_seconds=_auth_ttl_seconds())
+    
+    EventLog.objects.create(
+        user=user,
+        event_type=EventType.LOGIN,
+        payload={"wallet_address": wallet_address, "method": "debug_login"},
+    )
+    
+    return JsonResponse({"token": token, "wallet_address": user.wallet_address})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
 def register_wallet(request):
     try:
         payload = json.loads(request.body or b"{}")

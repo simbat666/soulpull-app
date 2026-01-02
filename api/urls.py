@@ -5,6 +5,7 @@ from . import views
 
 urlpatterns = [
     path("health", views.health, name="health"),
+    path("debug-login", views.debug_login, name="debug_login"),
     path("register-wallet", views.register_wallet, name="register_wallet"),
     path("tonproof/payload", views.tonproof_payload, name="tonproof_payload"),
     path("tonproof/verify", views.tonproof_verify, name="tonproof_verify"),

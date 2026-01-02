@@ -655,6 +655,29 @@
             }
           }
 
+          // TEST_MODE: try debug-login without tonProof
+          try {
+            setStatus('debug-login (TEST_MODE)…');
+            const r = await fetch(API_BASE + '/debug-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ wallet_address: address }),
+            });
+            const data = await r.json().catch(() => null);
+            if (r.ok && data?.token) {
+              localStorage.setItem(TOKEN_KEY, data.token);
+              currentToken = data.token;
+              const u = await me(data.token);
+              currentProfile = u;
+              renderProfile(u);
+              await maybeAutoTelegramVerify(u);
+              isLoggedIn = true;
+              return;
+            }
+          } catch (_) {
+            // debug-login failed, fall through to tonProof requirement
+          }
+
           // No valid token -> require a fresh connect with tonProof.
           // IMPORTANT: do NOT auto-disconnect on refresh, it looks like "TonConnect reset".
           setStatus('Нужна авторизация: откройте TonConnect и переподключите кошелёк.');
