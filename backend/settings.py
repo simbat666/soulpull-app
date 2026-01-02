@@ -1,3 +1,7 @@
+"""
+Soulpull MVP — Django Settings (согласно ТЗ §2, §10)
+"""
+
 from pathlib import Path
 import os
 
@@ -23,7 +27,7 @@ def _env_csv(name: str, default_list: list[str]) -> list[str]:
 
 
 # SECURITY
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
+SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
 DEBUG = _env_bool("DEBUG", False)
 
 ALLOWED_HOSTS = _env_csv(
@@ -52,6 +56,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "backend.security.SecurityHeadersMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -66,7 +71,7 @@ ROOT_URLCONF = "backend.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],
+        "DIRS": [BASE_DIR / "frontend"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -92,6 +97,10 @@ DATABASES = {
 }
 
 
+# Auth token TTL (24 hours)
+AUTH_TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", 86400))
+
+
 # I18N/TZ
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
@@ -101,5 +110,5 @@ USE_TZ = True
 
 # STATIC
 STATIC_URL = "/static/"
-STATICFILES_DIRS = [BASE_DIR / "static"]
+STATICFILES_DIRS = [BASE_DIR / "frontend" / "static"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
