@@ -196,7 +196,10 @@ def _create_intent(*, user: UserProfile, referrer_telegram_id: Optional[int], au
     Reserve a referrer slot (3/3) and create Participation(NEW) for user.
     Returns (participation, payment_intent, used_slots).
     """
-    if not user.telegram_id:
+    # TEST_MODE: skip strict checks for quick payment testing
+    test_mode = os.getenv("TEST_MODE", "").strip().lower() in ("1", "true", "yes")
+    
+    if not test_mode and not user.telegram_id:
         raise ValueError("telegram_required")
 
     # Author code is optional; if provided, it can't conflict with already set one.
@@ -205,7 +208,7 @@ def _create_intent(*, user: UserProfile, referrer_telegram_id: Optional[int], au
         raise ValueError("author_code_already_set")
 
     # Active cycle check: user can't start a new cycle until payout is SENT/PAID.
-    if _active_participation(user):
+    if not test_mode and _active_participation(user):
         raise ValueError("active_cycle")
 
     # If author code provided and not yet stored, persist and award points (optional).
@@ -232,7 +235,7 @@ def _create_intent(*, user: UserProfile, referrer_telegram_id: Optional[int], au
     referrer = None
     if referrer_telegram_id is None:
         # Seed rule: only allow missing referrer if the system has no CONFIRMED participations yet.
-        if _has_any_confirmed_participation():
+        if not test_mode and _has_any_confirmed_participation():
             raise ValueError("referrer_required")
         # Seed participation: ensure inviter fields are cleared.
         user.inviter_telegram_id = None
@@ -249,11 +252,11 @@ def _create_intent(*, user: UserProfile, referrer_telegram_id: Optional[int], au
         if referrer.id == user.id:
             raise ValueError("self_referral")
         # Referrer must have paid entry (at least one CONFIRMED participation).
-        if not Participation.objects.filter(user=referrer, status=ParticipationState.CONFIRMED).exists():
+        if not test_mode and not Participation.objects.filter(user=referrer, status=ParticipationState.CONFIRMED).exists():
             raise ValueError("referrer_not_confirmed")
 
         used_slots = _referrer_used_slots(referrer)
-        if used_slots >= 3:
+        if not test_mode and used_slots >= 3:
             raise RuntimeError("referrer_limit")
     used_slots = _referrer_used_slots(referrer) + 1 if referrer else 0
 

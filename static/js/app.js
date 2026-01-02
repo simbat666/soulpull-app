@@ -756,8 +756,9 @@
     if (btnPayCreate) {
       btnPayCreate.addEventListener('click', async () => {
         if (!currentToken) return setStatus('Ошибка: нет токена');
-        // enforce required inputs
-        if (!currentProfile?.telegram?.id) return setStatus('Ошибка: сначала привяжите Telegram');
+        // TEST MODE: skip frontend checks, backend will validate with TEST_MODE env
+        // In production: uncomment checks below
+        // if (!currentProfile?.telegram?.id) return setStatus('Ошибка: сначала привяжите Telegram');
         // Referrer is required for everyone except seed-first user (server enforces rules).
         // Author code is optional (server enforces single-apply).
         setStatus('creating payment…');
