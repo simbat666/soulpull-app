@@ -25,12 +25,13 @@ def _receiver_wallet() -> str:
 
 
 def _ticket_amount_usd_cents() -> int:
-    return int(os.getenv("TICKET_AMOUNT_USD_CENTS", "300"))
+    # 15 USDT = 1500 cents
+    return int(os.getenv("TICKET_AMOUNT_USD_CENTS", "1500"))
 
 
 def _ticket_jetton_amount() -> str:
-    # 3 USDT (6 decimals) => 3_000_000
-    return (os.getenv("TICKET_JETTON_AMOUNT") or "").strip() or "3000000"
+    # 15 USDT (6 decimals) => 15_000_000
+    return (os.getenv("TICKET_JETTON_AMOUNT") or "").strip() or "15000000"
 
 
 def _forward_ton_nanotons() -> str:

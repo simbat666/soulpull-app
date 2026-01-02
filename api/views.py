@@ -143,7 +143,7 @@ def _active_participation(user: UserProfile) -> Optional[Participation]:
         Participation.objects.filter(
             user=user,
             created_at__gt=start,
-            status__in=[ParticipationState.PENDING, ParticipationState.CONFIRMED],
+            status__in=[ParticipationState.NEW, ParticipationState.PENDING, ParticipationState.CONFIRMED],
         )
         .order_by("-created_at")
         .first()
@@ -156,10 +156,19 @@ def _referrer_used_slots(referrer: UserProfile) -> int:
         Participation.objects.filter(
             referrer=referrer,
             created_at__gt=start,
-            status__in=[ParticipationState.PENDING, ParticipationState.CONFIRMED],
+            status__in=[ParticipationState.NEW, ParticipationState.PENDING, ParticipationState.CONFIRMED],
         )
         .count()
     )
+
+
+def _has_any_confirmed_participation() -> bool:
+    """
+    "First user" seed rule:
+    - If there are no CONFIRMED participations in the whole system yet, allow creating an intent without referrer.
+    - Once at least one CONFIRMED exists, referrer becomes mandatory for everyone.
+    """
+    return Participation.objects.filter(status=ParticipationState.CONFIRMED).exists()
 
 
 def _referrer_cycle_l1_qs(referrer: UserProfile):
@@ -182,28 +191,28 @@ def _confirmed_l1_count(referrer: UserProfile) -> int:
     return _referrer_cycle_l1_qs(referrer).values("user_id").distinct().count()
 
 
-def _create_intent(*, user: UserProfile, referrer_telegram_id: int, author_code: str):
+def _create_intent(*, user: UserProfile, referrer_telegram_id: Optional[int], author_code: str):
     """
-    Reserve a referrer slot (3/3) and create Participation(PENDING) for user.
+    Reserve a referrer slot (3/3) and create Participation(NEW) for user.
     Returns (participation, payment_intent, used_slots).
     """
     if not user.telegram_id:
         raise ValueError("telegram_required")
-    if not author_code:
-        raise ValueError("author_code_required")
-    if user.author_code and user.author_code != author_code:
+
+    # Author code is optional; if provided, it can't conflict with already set one.
+    author_code = (author_code or "").strip()
+    if user.author_code and author_code and user.author_code != author_code:
         raise ValueError("author_code_already_set")
 
     # Active cycle check: user can't start a new cycle until payout is SENT/PAID.
     if _active_participation(user):
         raise ValueError("active_cycle")
 
-    # Ensure author code persisted on profile (required by business rules).
-    if not user.author_code:
+    # If author code provided and not yet stored, persist and award points (optional).
+    if author_code and not user.author_code:
         user.author_code = author_code
         user.author_code_applied_at = timezone.now()
         user.save(update_fields=["author_code", "author_code_applied_at", "updated_at"])
-        # optional points on known code
         ac = AuthorCode.objects.filter(code=author_code, active=True).select_related("owner").first()
         if ac:
             user.points = int(user.points or 0) + 10
@@ -220,36 +229,51 @@ def _create_intent(*, user: UserProfile, referrer_telegram_id: int, author_code:
     pay_intent = create_payment_intent(user)
 
     # Slot reservation must be atomic with referrer lock
-    referrer = (
-        UserProfile.objects.select_for_update()
-        .filter(telegram_id=referrer_telegram_id)
-        .first()
-    )
-    if not referrer:
-        raise ValueError("referrer_not_found")
-    if referrer.id == user.id:
-        raise ValueError("self_referral")
+    referrer = None
+    if referrer_telegram_id is None:
+        # Seed rule: only allow missing referrer if the system has no CONFIRMED participations yet.
+        if _has_any_confirmed_participation():
+            raise ValueError("referrer_required")
+        # Seed participation: ensure inviter fields are cleared.
+        user.inviter_telegram_id = None
+        user.inviter_wallet_address = None
+        user.inviter_set_at = None
+    else:
+        referrer = (
+            UserProfile.objects.select_for_update()
+            .filter(telegram_id=referrer_telegram_id)
+            .first()
+        )
+        if not referrer:
+            raise ValueError("referrer_not_found")
+        if referrer.id == user.id:
+            raise ValueError("self_referral")
+        # Referrer must have paid entry (at least one CONFIRMED participation).
+        if not Participation.objects.filter(user=referrer, status=ParticipationState.CONFIRMED).exists():
+            raise ValueError("referrer_not_confirmed")
 
-    used_slots = _referrer_used_slots(referrer)
-    if used_slots >= 3:
-        raise RuntimeError("referrer_limit")
+        used_slots = _referrer_used_slots(referrer)
+        if used_slots >= 3:
+            raise RuntimeError("referrer_limit")
+    used_slots = _referrer_used_slots(referrer) + 1 if referrer else 0
 
     part = Participation.objects.create(
         user=user,
         referrer=referrer,
         author_code=user.author_code,
         amount_usd_cents=pay_intent.amount_usd_cents,
-        status=ParticipationState.PENDING,
+        status=ParticipationState.NEW,
     )
 
     # Store candidate referrer on profile for UI (optional)
-    user.inviter_telegram_id = referrer.telegram_id
-    user.inviter_wallet_address = None
-    user.inviter_set_at = timezone.now()
+    if referrer:
+        user.inviter_telegram_id = referrer.telegram_id
+        user.inviter_wallet_address = None
+        user.inviter_set_at = timezone.now()
     user.participation_status = ParticipationStatus.PENDING
     user.save(update_fields=["inviter_telegram_id", "inviter_wallet_address", "inviter_set_at", "participation_status", "updated_at"])
 
-    return part, pay_intent, used_slots + 1
+    return part, pay_intent, used_slots
 
 
 @csrf_exempt
@@ -710,14 +734,16 @@ def intent(request):
     ref_tid = body.get("referrer_telegram_id")
     if ref_tid is None:
         ref_tid = user.inviter_telegram_id
-    try:
-        ref_tid = int(ref_tid)
-    except Exception:
-        return JsonResponse({"error": "referrer_telegram_id is required"}, status=400)
+    if ref_tid is not None and str(ref_tid).strip() != "":
+        try:
+            ref_tid = int(ref_tid)
+        except Exception:
+            return JsonResponse({"error": "referrer_telegram_id is invalid"}, status=400)
+    else:
+        ref_tid = None
 
+    # Author code is optional.
     code = (body.get("author_code") or user.author_code or "").strip()
-    if not code:
-        return JsonResponse({"error": "author_code is required"}, status=400)
 
     try:
         with transaction.atomic():
@@ -777,16 +803,13 @@ def participation_create(request):
     user = user_or_resp
 
     # Backward-compatible wrapper around /intent.
-    if not user.inviter_telegram_id:
-        return JsonResponse({"error": "referrer_telegram_id is required"}, status=400)
-    if not user.author_code:
-        return JsonResponse({"error": "author_code is required"}, status=400)
+    # Referrer is required for everyone except seed-first user (handled inside _create_intent).
     try:
         with transaction.atomic():
             part, pay_intent, used_slots = _create_intent(
                 user=user,
-                referrer_telegram_id=int(user.inviter_telegram_id),
-                author_code=str(user.author_code),
+                referrer_telegram_id=int(user.inviter_telegram_id) if user.inviter_telegram_id else None,
+                author_code=str(user.author_code or ""),
             )
     except RuntimeError:
         return JsonResponse({"error": "referrer_limit"}, status=409)
@@ -848,13 +871,17 @@ def participation_confirm(request):
         if not part:
             return JsonResponse({"error": "participation not found"}, status=404)
         user = part.user
-        if part.status != ParticipationState.PENDING:
+        if part.status not in {ParticipationState.NEW, ParticipationState.PENDING}:
             return JsonResponse({"error": "participation is not pending"}, status=400)
     else:
         user = UserProfile.objects.filter(wallet_address=wallet).first()
         if not user:
             return JsonResponse({"error": "user not found"}, status=404)
-        part = Participation.objects.filter(user=user, status=ParticipationState.PENDING).order_by("-created_at").first()
+        part = (
+            Participation.objects.filter(user=user, status__in=[ParticipationState.NEW, ParticipationState.PENDING])
+            .order_by("-created_at")
+            .first()
+        )
         if not part:
             return JsonResponse({"error": "no pending participation"}, status=400)
 
@@ -878,7 +905,7 @@ def participation_confirm(request):
     if tx_hash:
         dup = (
             Participation.objects.exclude(id=part.id)
-            .filter(tx_hash=tx_hash, status__in=[ParticipationState.PENDING, ParticipationState.CONFIRMED])
+            .filter(tx_hash=tx_hash, status__in=[ParticipationState.NEW, ParticipationState.PENDING, ParticipationState.CONFIRMED])
             .exists()
         )
         if dup:
@@ -1136,7 +1163,7 @@ def admin_participations_pending(request):
     if ok is not True:
         return ok
     qs = (
-        Participation.objects.filter(status=ParticipationState.PENDING)
+        Participation.objects.filter(status__in=[ParticipationState.NEW, ParticipationState.PENDING])
         .select_related("user", "referrer")
         .order_by("created_at")[:200]
     )

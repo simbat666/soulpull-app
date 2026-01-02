@@ -78,9 +78,12 @@
     if (m === 'unauthorized' || m.includes('failed: 401')) return 'нет авторизации: подключите кошелёк и заново войдите (TonConnect + tonProof)';
     if (m.includes('failed: 403') || m === 'forbidden') return 'доступ запрещён (403)';
     if (m.includes('referrer_telegram_id must be digits')) return 'реферер должен быть telegram_id (только цифры), не @username и не адрес кошелька';
+    if (m.includes('referrer_required')) return 'нужен пригласивший (referrer). Исключение: только самый первый пользователь проекта';
+    if (m.includes('referrer_not_confirmed')) return 'этот реферер ещё не оплатил вход (нет CONFIRMED) — по нему нельзя заходить';
     if (m.includes('self_referral')) return 'нельзя указать себя как реферера';
     if (m.includes('inviter can not be changed after activation')) return 'реферера нельзя менять после активации';
     if (m.includes('author_code already applied')) return 'код автора уже применён (повторно нельзя)';
+    if (m.includes('active_cycle')) return 'нельзя начать новый цикл: текущий ещё не завершён (ожидается выплата)';
     if (m.includes('referrer_limit')) return 'у этого реферера закончились слоты (лимит 3/3)';
     return m;
   }
@@ -106,6 +109,12 @@
     if (ok === true) elm.classList.add('tag--ok');
     else if (ok === false) elm.classList.add('tag--bad');
     else elm.classList.add('tag--warn');
+  }
+
+  function updateWalletChecklistTag(address) {
+    // Wallet address can be present from TonConnect status callback even before we load /me profile.
+    const ok = !!(address && String(address).trim());
+    setTag(chkWalletEl, ok, ok ? 'OK' : 'нет');
   }
 
   function getTelegramWebApp() {
@@ -521,7 +530,7 @@
         setStatus('logged in');
       }
 
-      // Payment/intent gating (business rules): Telegram + referrer + author code are required
+      // Payment/intent gating (business rules): Telegram + referrer are required (author code is optional)
       const hasTg = !!u.telegram?.id;
       const hasReferrer = !!u.inviter?.telegram_id;
       const hasCode = !!u.author_code;
@@ -536,7 +545,8 @@
       setTag(chkWalletEl, walletOk, walletOk ? 'OK' : 'нет');
       setTag(chkTelegramEl, hasTg, hasTg ? 'OK' : 'нужно');
       setTag(chkReferrerEl, hasReferrer, hasReferrer ? 'OK' : 'нужно');
-      setTag(chkCodeEl, hasCode, hasCode ? 'OK' : 'нужно');
+      // Author code is optional
+      setTag(chkCodeEl, hasCode ? true : null, hasCode ? 'OK' : 'опц');
       setTag(chkPaidEl, !!lastPaymentIntent, lastPaymentIntent ? 'создано' : 'нет');
       setTag(chkConfirmedEl, isConfirmed ? true : null, isConfirmed ? 'CONFIRMED' : (activePart ? activePart.status : '—'));
 
@@ -562,15 +572,12 @@
         } else if (!hasReferrer) {
           action = () => inviterInput?.focus();
           hint = 'Шаг 3: введите telegram_id пригласившего и нажмите «Сохранить».';
-        } else if (!hasCode) {
-          action = () => authorCodeInput?.focus();
-          hint = 'Шаг 4: введите код автора и нажмите «Применить».';
         } else if (!lastPaymentIntent) {
           action = () => btnPayCreate?.click();
-          hint = 'Шаг 5: нажмите «Оплатить 3 USDT» (создастся intent).';
+          hint = 'Шаг 4: нажмите «Оплатить 15 USDT» (создастся intent).';
         } else {
           action = () => btnPaySend?.click();
-          hint = 'Шаг 5: нажмите «Отправить через кошелёк» и подтвердите в Tonkeeper.';
+          hint = 'Шаг 4: нажмите «Отправить через кошелёк» и подтвердите в Tonkeeper.';
         }
         nextHintEl.textContent = hint;
         btnNextAction.onclick = () => {
@@ -614,6 +621,7 @@
         if (!address) {
           currentWalletAddress = null;
           setAddress('');
+          updateWalletChecklistTag(null);
           setStatus(`wallet disconnected (${debugTonConnectStorage()})`);
           showScreen('connect');
           return;
@@ -621,6 +629,7 @@
 
         currentWalletAddress = address;
         setAddress(address);
+        updateWalletChecklistTag(address);
         setStatus(`wallet connected (${debugTonConnectStorage()})`);
         showScreen('onboarding');
         if (currentProfile) renderProfile(currentProfile);
@@ -689,6 +698,7 @@
         if (addr && !currentWalletAddress) {
           currentWalletAddress = addr;
           setAddress(addr);
+          updateWalletChecklistTag(addr);
           setStatus(`wallet restored (${debugTonConnectStorage()})`);
           showScreen('onboarding');
           if (currentProfile) renderProfile(currentProfile);
@@ -748,8 +758,8 @@
         if (!currentToken) return setStatus('Ошибка: нет токена');
         // enforce required inputs
         if (!currentProfile?.telegram?.id) return setStatus('Ошибка: сначала привяжите Telegram');
-        if (!currentProfile?.inviter?.telegram_id) return setStatus('Ошибка: укажите кто пригласил (telegram_id)');
-        if (!currentProfile?.author_code) return setStatus('Ошибка: введите код автора');
+        // Referrer is required for everyone except seed-first user (server enforces rules).
+        // Author code is optional (server enforces single-apply).
         setStatus('creating payment…');
         try {
           // SSOT: create Participation(PENDING) + payment intent in one step

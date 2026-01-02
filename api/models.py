@@ -174,6 +174,7 @@ class AuthorCode(models.Model):
 
 
 class ParticipationState(models.TextChoices):
+    NEW = "NEW", "NEW"
     PENDING = "PENDING", "PENDING"
     CONFIRMED = "CONFIRMED", "CONFIRMED"
     REJECTED = "REJECTED", "REJECTED"
@@ -193,7 +194,7 @@ class Participation(models.Model):
     author_code = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     amount_usd_cents = models.IntegerField(default=1500)
     tx_hash = models.CharField(max_length=128, null=True, blank=True, db_index=True)
-    status = models.CharField(max_length=16, choices=ParticipationState.choices, default=ParticipationState.PENDING, db_index=True)
+    status = models.CharField(max_length=16, choices=ParticipationState.choices, default=ParticipationState.NEW, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     admin_note = models.TextField(null=True, blank=True)
