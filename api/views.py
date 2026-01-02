@@ -304,15 +304,23 @@ def register_wallet(request):
     if not wallet_address:
         return JsonResponse({"error": "wallet_address is required"}, status=400)
 
-    obj, created = UserProfile.objects.get_or_create(wallet_address=wallet_address)
-    if not created:
-        # Touch updated_at
-        obj.save(update_fields=["updated_at"])
+    try:
+        obj, created = UserProfile.objects.get_or_create(wallet_address=wallet_address)
+        if not created:
+            # Touch updated_at
+            obj.save(update_fields=["updated_at"])
 
-    return JsonResponse(
-        {"success": True, "created": created, "wallet_address": obj.wallet_address},
-        status=201 if created else 200,
-    )
+        return JsonResponse(
+            {"success": True, "created": created, "wallet_address": obj.wallet_address},
+            status=201 if created else 200,
+        )
+    except Exception as e:
+        # Return JSON error instead of HTML 500, so we can debug on frontend
+        logger.exception("register_wallet failed")
+        return JsonResponse(
+            {"error": "server_error", "error_type": e.__class__.__name__, "message": str(e)},
+            status=500
+        )
 
 
 @csrf_exempt
