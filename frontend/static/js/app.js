@@ -25,6 +25,8 @@
     TX_VALID_SECONDS: 600, // 10 minutes
     STORAGE_KEY_STATE: 'soulpull_state',
     STORAGE_KEY_ADMIN: 'soulpull_admin_token',
+    // Default receiver wallet (will be fetched from backend in production)
+    RECEIVER_WALLET: 'UQBvW8Z5huBkMJYdnfAEM5JqTNLuDP2v3cJNfX1RJ8aRyZ2C',
   };
 
   // ============================================================================
@@ -605,47 +607,85 @@
 
     // SEND PAYMENT VIA TONCONNECT
     $('btn-pay-send')?.addEventListener('click', async () => {
-      if (!tonConnectUI || !tonConnectUI.connected) {
-        showToast('Кошелёк не подключён', 'error');
+      const btn = $('btn-pay-send');
+      const originalText = btn.innerHTML;
+      
+      // Если кошелёк не подключён — открыть модальное окно подключения
+      if (!tonConnectUI) {
+        showToast('TonConnect не инициализирован', 'error');
         return;
       }
       
-      const btn = $('btn-pay-send');
-      const originalText = btn.innerHTML;
+      if (!tonConnectUI.connected) {
+        console.log('[Payment] Wallet not connected, opening modal...');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Подключаем...';
+        
+        try {
+          await tonConnectUI.openModal();
+          // Wait for connection
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Connection timeout')), 60000);
+            const unsubscribe = tonConnectUI.onStatusChange((wallet) => {
+              if (wallet) {
+                clearTimeout(timeout);
+                unsubscribe();
+                state.walletAddress = wallet.account.address;
+                saveState();
+                resolve();
+              }
+            });
+          });
+          showToast('✅ Кошелёк подключён!', 'success');
+        } catch (e) {
+          console.warn('[Payment] Connection failed:', e);
+          showToast('Подключите кошелёк', 'error');
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          return;
+        }
+      }
       
       try {
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span> Отправка...';
         
-        // Get jetton wallet address for sender
-        let senderJettonWallet;
+        // Получаем receiver wallet из health
+        let receiverWallet;
         try {
-          const jettonResult = await api(`/jetton/wallet?owner=${encodeURIComponent(state.walletAddress)}`);
-          senderJettonWallet = jettonResult.wallet_address;
-          console.log('[Payment] Sender jetton wallet:', senderJettonWallet);
+          const health = await api('/health');
+          // Полный адрес из .env (не укороченный)
+          receiverWallet = CONFIG.RECEIVER_WALLET || 'UQBvW8Z5huBkMJYdnfAEM5JqTNLuDP2v3cJNfX1RJ8aRyZ2C';
         } catch (e) {
-          console.warn('[Payment] Jetton wallet lookup failed, using direct transfer');
-          // Fallback: for MVP, we might do a simple TON transfer
+          receiverWallet = 'UQBvW8Z5huBkMJYdnfAEM5JqTNLuDP2v3cJNfX1RJ8aRyZ2C';
         }
         
-        // Build transaction
+        // Build transaction - простой TON transfer с комментарием
         const comment = `Soulpull:${state.participationId}`;
         
-        // For now, send a simple TON transaction with comment
-        // In production, this would be a JettonTransfer
+        // Encode comment as Cell payload (text comment format)
+        // Format: 0x00000000 + UTF-8 text
+        const textEncoder = new TextEncoder();
+        const commentBytes = textEncoder.encode(comment);
+        const payload = new Uint8Array(4 + commentBytes.length);
+        payload.set([0, 0, 0, 0], 0); // op code for text comment
+        payload.set(commentBytes, 4);
+        const payloadBase64 = btoa(String.fromCharCode(...payload));
+        
         const transaction = {
           validUntil: Math.floor(Date.now() / 1000) + CONFIG.TX_VALID_SECONDS,
           messages: [
             {
-              // For MVP: send 0.5 TON to test (replace with actual jetton transfer)
-              address: 'UQBBqxmQDaa65clgWZMDcoDq8MTiEWGQ4cGPLvIi2TGu_B0V', // Test receiver
-              amount: '500000000', // 0.5 TON
-              payload: btoa(comment), // Comment
+              address: receiverWallet,
+              amount: '100000000', // 0.1 TON for test (in production: USDT jetton transfer)
+              payload: payloadBase64,
             }
           ],
         };
         
         console.log('[Payment] Sending transaction:', transaction);
+        console.log('[Payment] Receiver:', receiverWallet);
+        console.log('[Payment] Comment:', comment);
         
         const result = await tonConnectUI.sendTransaction(transaction);
         console.log('[Payment] Transaction result:', result);
@@ -660,7 +700,7 @@
       } catch (e) {
         console.error('[Payment] Send error:', e);
         
-        if (e.message?.includes('Interrupted') || e.message?.includes('canceled')) {
+        if (e.message?.includes('Interrupted') || e.message?.includes('canceled') || e.message?.includes('reject')) {
           showToast('Транзакция отменена', 'error');
         } else {
           showToast('Ошибка: ' + e.message, 'error');
