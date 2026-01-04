@@ -122,7 +122,7 @@ def _referrer_used_slots(referrer: UserProfile) -> int:
     Count occupied slots for referrer (NEW, PENDING, CONFIRMED participations).
     """
     return Participation.objects.filter(
-        referrer=referrer,
+            referrer=referrer,
         status__in=[ParticipationStatus.NEW, ParticipationStatus.PENDING, ParticipationStatus.CONFIRMED],
     ).count()
 
@@ -160,21 +160,21 @@ def _create_intent(
     referrer = None
     if referrer_telegram_id is not None:
         referrer = UserProfile.objects.select_for_update().filter(telegram_id=referrer_telegram_id).first()
-        if not referrer:
-            raise ValueError("referrer_not_found")
-        if referrer.id == user.id:
+    if not referrer:
+        raise ValueError("referrer_not_found")
+    if referrer.id == user.id:
             RiskEvent.objects.create(user=user, kind=RiskEventKind.SELF_REFERRAL, meta={"referrer_tid": referrer_telegram_id})
-            raise ValueError("self_referral")
-        
+        raise ValueError("self_referral")
+
         # Check referrer has CONFIRMED participation
         if not Participation.objects.filter(user=referrer, status=ParticipationStatus.CONFIRMED).exists():
             raise ValueError("referrer_not_confirmed")
         
         # Check 3/3 slots
-        used_slots = _referrer_used_slots(referrer)
-        if used_slots >= 3:
+    used_slots = _referrer_used_slots(referrer)
+    if used_slots >= 3:
             RiskEvent.objects.create(user=user, kind=RiskEventKind.REF_LIMIT, meta={"referrer_tid": referrer_telegram_id, "slots": used_slots})
-            raise RuntimeError("referrer_limit")
+        raise RuntimeError("referrer_limit")
     else:
         used_slots = 0
 
@@ -244,7 +244,7 @@ def _decode_pubkey(public_key: str) -> bytes:
     try:
         if len(s) == 64 and all(c in "0123456789abcdefABCDEF" for c in s):
             return bytes.fromhex(s)
-    except Exception:
+        except Exception:
         pass
     b = _b64decode_padded(s)
     if len(b) != 32:
@@ -346,7 +346,7 @@ def wallet(request):
     existing = UserProfile.objects.filter(wallet=wallet_addr).exclude(id=user.id).first()
     if existing:
         RiskEvent.objects.create(
-            user=user,
+        user=user,
             kind=RiskEventKind.WALLET_REUSED,
             meta={"wallet": wallet_addr, "existing_user_id": existing.id}
         )
@@ -418,7 +418,7 @@ def intent(request):
         return _error_response(err_info[0], err_info[1], err_info[2])
 
     result = {
-        "ok": True,
+            "ok": True,
         "participation": {
             "id": participation.id,
             "status": participation.status,
@@ -549,7 +549,7 @@ def me(request):
     )
 
     return _json_response({
-        "user": {
+                "user": {
             "id": user.id,
             "telegram_id": user.telegram_id,
             "username": user.username,
@@ -815,26 +815,26 @@ def admin_participations_pending(request):
     ).select_related("user", "referrer").order_by("created_at")[:200]
 
     return _json_response({
-        "items": [
-            {
-                "id": p.id,
+            "items": [
+                {
+                    "id": p.id,
                 "status": p.status,
-                "created_at": p.created_at.isoformat(),
-                "author_code": p.author_code,
-                "user": {
+                    "created_at": p.created_at.isoformat(),
+                    "author_code": p.author_code,
+                    "user": {
                     "id": p.user.id,
-                    "telegram_id": p.user.telegram_id,
+                        "telegram_id": p.user.telegram_id,
                     "username": p.user.username,
                     "wallet": p.user.wallet,
-                },
-                "referrer": {
+                    },
+                    "referrer": {
                     "id": p.referrer.id if p.referrer else None,
-                    "telegram_id": p.referrer.telegram_id if p.referrer else None,
+                        "telegram_id": p.referrer.telegram_id if p.referrer else None,
                     "username": p.referrer.username if p.referrer else None,
                 } if p.referrer else None,
-            }
-            for p in qs
-        ]
+                }
+                for p in qs
+            ]
     })
 
 
@@ -851,18 +851,18 @@ def admin_payouts_open(request):
     ).select_related("user").order_by("created_at")[:200]
 
     return _json_response({
-        "items": [
-            {
-                "id": p.id,
-                "status": p.status,
+            "items": [
+                {
+                    "id": p.id,
+                    "status": p.status,
                 "created_at": p.created_at.isoformat(),
-                "user": {
+                    "user": {
                     "id": p.user.id,
-                    "telegram_id": p.user.telegram_id,
+                        "telegram_id": p.user.telegram_id,
                     "username": p.user.username,
                     "wallet": p.user.wallet,
-                },
-            }
-            for p in qs
-        ]
+                    },
+                }
+                for p in qs
+            ]
     })
