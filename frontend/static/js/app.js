@@ -511,6 +511,9 @@
       // Fetch receiver wallet from backend
       const health = await api('/health');
       console.log('[Payment] Health check:', health);
+      if (health.receiver_wallet) {
+        $('payment-receiver').textContent = health.receiver_wallet;
+      }
     } catch (e) {
       console.warn('[Payment] Health check failed:', e);
     }
@@ -531,6 +534,28 @@
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span> Создаём...';
         
+        // Ensure user is registered first
+        await api('/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            telegram_id: state.telegramId,
+            username: state.username,
+          }),
+        });
+        console.log('[Payment] User registered');
+        
+        // Link wallet if available
+        if (state.walletAddress) {
+          await api('/wallet', {
+            method: 'POST',
+            body: JSON.stringify({
+              telegram_id: state.telegramId,
+              wallet: state.walletAddress,
+            }),
+          });
+          console.log('[Payment] Wallet linked');
+        }
+        
         // Call /intent to create participation
         const result = await api('/intent', {
           method: 'POST',
@@ -547,8 +572,7 @@
         state.participationStatus = result.participation.status;
         saveState();
         
-        // Update UI with payment details
-        $('payment-receiver').textContent = 'Receiver Wallet'; // Will be fetched
+        // Update UI with payment details (receiver already fetched)
         $('payment-comment').textContent = `Soulpull:${state.participationId}`;
         $('payment-intent-row').style.display = 'flex';
         $('payment-intent-id').textContent = `#${state.participationId}`;

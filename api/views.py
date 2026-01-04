@@ -283,10 +283,13 @@ def _expected_domain() -> str:
 @require_http_methods(["GET"])
 def health(request):
     """Health check endpoint."""
+    receiver = os.getenv("RECEIVER_WALLET", "")
     return _json_response({
         "status": "ok",
         "time": timezone.now().isoformat(),
         "debug": bool(settings.DEBUG),
+        "receiver_wallet": receiver[:8] + "..." + receiver[-6:] if len(receiver) > 14 else receiver,
+        "payment_amount": "15 USDT",
     })
 
 
