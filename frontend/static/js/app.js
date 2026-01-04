@@ -637,26 +637,67 @@
         return;
       }
       
-      // Кошелёк должен быть уже подключён!
-      if (!tonConnectUI.connected) {
-        showToast('⚠️ Сначала подключи кошелёк на предыдущем шаге!', 'error');
-        showScreen('screen-wallet');
-        return;
+      // Подробная проверка подключения
+      console.log('[Payment] TonConnect state:', {
+        connected: tonConnectUI.connected,
+        wallet: tonConnectUI.wallet,
+        account: tonConnectUI.account,
+      });
+      
+      // Если кошелёк не подключён — подключить
+      if (!tonConnectUI.connected || !tonConnectUI.wallet) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Подключаем кошелёк...';
+        
+        try {
+          console.log('[Payment] Opening wallet connection modal...');
+          await tonConnectUI.openModal();
+          
+          // Ждём подключения
+          const wallet = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Timeout')), 60000);
+            
+            if (tonConnectUI.connected && tonConnectUI.wallet) {
+              clearTimeout(timeout);
+              resolve(tonConnectUI.wallet);
+              return;
+            }
+            
+            const unsub = tonConnectUI.onStatusChange((w) => {
+              if (w) {
+                clearTimeout(timeout);
+                unsub();
+                resolve(w);
+              }
+            });
+          });
+          
+          console.log('[Payment] Wallet connected:', wallet);
+          state.walletAddress = wallet.account.address;
+          saveState();
+          showToast('✅ Кошелёк подключён!', 'success');
+          
+        } catch (e) {
+          console.error('[Payment] Connection error:', e);
+          showToast('Подключите кошелёк и попробуйте снова', 'error');
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          return;
+        }
       }
       
-      // Кошелёк подключён — отправляем транзакцию (откроется кошелёк для подтверждения)
-      
+      // Кошелёк подключён — отправляем транзакцию
       try {
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Открываем кошелёк...';
+        btn.innerHTML = '<span class="spinner"></span> Отправляем...';
         
-        // Receiver wallet address (TON mainnet format)
+        // Receiver wallet address
         const receiverWallet = CONFIG.RECEIVER_WALLET;
-        const comment = `Soulpull:${state.participationId || 1}`;
+        console.log('[Payment] Receiver wallet:', receiverWallet);
         
-        // Простой TON transfer БЕЗ payload - максимально совместимый формат
+        // Формируем транзакцию
         const transaction = {
-          validUntil: Math.floor(Date.now() / 1000) + 600, // 10 минут
+          validUntil: Math.floor(Date.now() / 1000) + 600,
           messages: [
             {
               address: receiverWallet,
@@ -665,14 +706,14 @@
           ],
         };
         
-        console.log('[Payment] Sending simple transaction:', transaction);
-        console.log('[Payment] To:', receiverWallet);
+        console.log('[Payment] Transaction:', JSON.stringify(transaction, null, 2));
+        console.log('[Payment] Calling sendTransaction...');
         
-        showToast('📱 Подтверди в кошельке!', 'info');
+        showToast('📱 Подтверди транзакцию в кошельке!', 'info');
         
-        // Отправляем транзакцию - откроется кошелёк
+        // Отправляем транзакцию
         const result = await tonConnectUI.sendTransaction(transaction);
-        console.log('[Payment] Transaction sent! Result:', result);
+        console.log('[Payment] SUCCESS! Result:', result);
         
         // Show pending status
         $('btn-pay-send')?.classList.add('hidden');
@@ -683,13 +724,25 @@
         
       } catch (e) {
         console.error('[Payment] Send error:', e);
+        console.error('[Payment] Error details:', {
+          name: e.name,
+          message: e.message,
+          code: e.code,
+          stack: e.stack,
+        });
         
+        let errorMsg = 'Ошибка отправки';
         if (e.message?.includes('Interrupted') || e.message?.includes('canceled') || e.message?.includes('reject')) {
-          showToast('Транзакция отменена', 'error');
-        } else {
-          showToast('Ошибка: ' + e.message, 'error');
+          errorMsg = 'Транзакция отменена пользователем';
+        } else if (e.message?.includes('timeout')) {
+          errorMsg = 'Время ожидания истекло';
+        } else if (e.message?.includes('User rejects')) {
+          errorMsg = 'Вы отменили транзакцию';
+        } else if (e.message) {
+          errorMsg = e.message;
         }
         
+        showToast('❌ ' + errorMsg, 'error');
         btn.disabled = false;
         btn.innerHTML = originalText;
       }
