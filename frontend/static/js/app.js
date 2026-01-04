@@ -673,6 +673,9 @@
         console.log('[Payment] Receiver:', receiverWallet);
         console.log('[Payment] Comment:', comment);
         
+        // Показать подсказку перед отправкой
+        showToast('📱 Подтверди транзакцию в кошельке на телефоне!', 'info');
+        
         const result = await tonConnectUI.sendTransaction(transaction);
         console.log('[Payment] Transaction result:', result);
         
