@@ -228,19 +228,18 @@
       $('banner-not-telegram')?.classList.add('hidden');
       return true;
     } else {
-      // Not in Telegram
+      // Not in Telegram — dev mode
       $('banner-not-telegram')?.classList.remove('hidden');
       
-      // Dev mode: prompt for telegram_id
-      const devTid = prompt('🔧 Dev Mode: Enter your telegram_id', '123456789');
-      if (devTid && /^\d+$/.test(devTid)) {
-        state.telegramId = parseInt(devTid);
-        state.username = 'dev_user_' + devTid;
-        console.log('[Dev] Using telegram_id:', state.telegramId);
-        return true;
-      }
+      // Auto-assign dev telegram_id (без блокирующего prompt)
+      // Можно изменить в консоли: state.telegramId = 12345
+      const urlParams = new URLSearchParams(window.location.search);
+      const devTid = urlParams.get('tid') || '123456789';
       
-      return false;
+      state.telegramId = parseInt(devTid);
+      state.username = 'dev_user_' + devTid;
+      console.log('[Dev] Auto telegram_id:', state.telegramId, '(add ?tid=XXX to URL to change)');
+      return true;
     }
   }
 
