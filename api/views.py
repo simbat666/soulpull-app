@@ -160,9 +160,19 @@ def _create_intent(
     referrer = None
     if referrer_telegram_id is not None:
         referrer = UserProfile.objects.select_for_update().filter(telegram_id=referrer_telegram_id).first()
+    
+    # SEED USER LOGIC: Если нет ни одного CONFIRMED участника — разрешить без реферера
+    has_any_confirmed = Participation.objects.filter(status=ParticipationStatus.CONFIRMED).exists()
+    
     if not referrer:
-        raise ValueError("referrer_not_found")
-    if referrer.id == user.id:
+        if has_any_confirmed:
+            # Уже есть пользователи — реферер обязателен
+            raise ValueError("referrer_not_found")
+        else:
+            # Первый пользователь (seed) — реферер не нужен
+            logger.info(f"[SEED USER] {user.telegram_id} registering as first user without referrer")
+    
+    if referrer and referrer.id == user.id:
         RiskEvent.objects.create(
             user=user,
             kind=RiskEventKind.SELF_REFERRAL,
@@ -170,19 +180,22 @@ def _create_intent(
         )
         raise ValueError("self_referral")
 
-    # Check referrer has CONFIRMED participation
-    if not Participation.objects.filter(user=referrer, status=ParticipationStatus.CONFIRMED).exists():
-        raise ValueError("referrer_not_confirmed")
+    # Проверки только если есть реферер (не seed user)
+    used_slots = 0
+    if referrer:
+        # Check referrer has CONFIRMED participation
+        if not Participation.objects.filter(user=referrer, status=ParticipationStatus.CONFIRMED).exists():
+            raise ValueError("referrer_not_confirmed")
 
-    # Check 3/3 slots
-    used_slots = _referrer_used_slots(referrer)
-    if used_slots >= 3:
-        RiskEvent.objects.create(
-            user=user,
-            kind=RiskEventKind.REF_LIMIT,
-            meta={"referrer_tid": referrer_telegram_id, "slots": used_slots},
-        )
-        raise RuntimeError("referrer_limit")
+        # Check 3/3 slots
+        used_slots = _referrer_used_slots(referrer)
+        if used_slots >= 3:
+            RiskEvent.objects.create(
+                user=user,
+                kind=RiskEventKind.REF_LIMIT,
+                meta={"referrer_tid": referrer_telegram_id, "slots": used_slots},
+            )
+            raise RuntimeError("referrer_limit")
 
     # Handle author code
     code = (author_code or "").strip() or None

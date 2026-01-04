@@ -461,6 +461,14 @@
       saveState();
       showScreen('screen-author');
     });
+
+    // Кнопка "Я первый пользователь (seed)" — пропустить реферера
+    $('btn-referral-skip')?.addEventListener('click', () => {
+      state.referrerTelegramId = null;
+      saveState();
+      showScreen('screen-author');
+      showToast('🌱 Регистрация как первый пользователь', 'success');
+    });
   }
 
   // ============================================================================

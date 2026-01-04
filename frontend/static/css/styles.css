@@ -444,6 +444,20 @@ body::after {
   color: var(--text-primary);
 }
 
+.btn-ghost {
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  padding: 10px 20px;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  border-color: rgba(46, 204, 113, 0.5);
+  color: #2ecc71;
+  background: rgba(46, 204, 113, 0.1);
+}
+
 .btn-success {
   background: var(--gradient-salvation);
   color: white;
@@ -547,6 +561,20 @@ body::after {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 8px;
+}
+
+/* Seed User Block */
+.seed-user-block {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  text-align: center;
+}
+
+.seed-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
 }
 
 /* ============================================================================
