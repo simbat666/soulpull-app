@@ -352,7 +352,7 @@ def wallet(request):
     existing = UserProfile.objects.filter(wallet=wallet_addr).exclude(id=user.id).first()
     if existing:
         RiskEvent.objects.create(
-        user=user,
+            user=user,
             kind=RiskEventKind.WALLET_REUSED,
             meta={"wallet": wallet_addr, "existing_user_id": existing.id}
         )
@@ -534,9 +534,9 @@ def me(request):
             created_at__gt=active.created_at,
         ).select_related("user").order_by("-created_at")[:50]
 
-        for p in l1_qs:
+    for p in l1_qs:
             l1_list.append({
-                "telegram_id": p.user.telegram_id,
+                    "telegram_id": p.user.telegram_id,
                 "username": p.user.username,
                 "paid": p.status == ParticipationStatus.CONFIRMED,
                 "created_at": p.created_at.isoformat(),
@@ -563,18 +563,18 @@ def me(request):
             "points": user.points,
         },
         "participation": {
-            "id": active.id,
-            "status": active.status,
-            "created_at": active.created_at.isoformat(),
-            "confirmed_at": active.confirmed_at.isoformat() if active.confirmed_at else None,
+                        "id": active.id,
+                        "status": active.status,
+                        "created_at": active.created_at.isoformat(),
+                        "confirmed_at": active.confirmed_at.isoformat() if active.confirmed_at else None,
         } if active else None,
         "l1": l1_list,
         "slots": {
             "used": used_slots,
             "limit": 3,
         },
-        "confirmed_l1": confirmed_l1,
-        "eligible_payout": eligible_payout,
+                "confirmed_l1": confirmed_l1,
+                "eligible_payout": eligible_payout,
         "has_open_payout": open_payout,
     })
 
@@ -700,6 +700,145 @@ def jetton_wallet(request):
     except Exception as e:
         logger.exception("jetton_wallet failed")
         return _error_response("server_error", str(e), 500)
+
+
+# ============================================================================
+# PAYMENT ENDPOINTS
+# ============================================================================
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payment_intent(request):
+    """
+    POST /api/v1/payment/intent
+    Creates payment intent with full details for JettonTransfer.
+    
+    Req: { "participation_id": int }
+    Res: {
+        "intent_id": int,
+        "receiver_wallet": "UQ...",
+        "usdt_amount": "15000000",
+        "forward_ton": "50000000",
+        "comment": "Soulpull:123",
+        "valid_until": 1234567890
+    }
+    """
+    body, err = _parse_json_body(request)
+    if err:
+        return err
+
+    participation_id = body.get("participation_id")
+    if participation_id is None:
+        return _error_response("validation_error", "participation_id is required")
+
+    try:
+        participation = Participation.objects.get(id=int(participation_id))
+    except (Participation.DoesNotExist, ValueError):
+        return _error_response("not_found", "Participation not found", 404)
+
+    if participation.status not in [ParticipationStatus.NEW, ParticipationStatus.PENDING]:
+        return _error_response("invalid_status", f"Participation already {participation.status}")
+
+    receiver_wallet = os.getenv("RECEIVER_WALLET", "")
+    if not receiver_wallet:
+        return _error_response("server_error", "RECEIVER_WALLET not configured", 500)
+
+    valid_until = int(timezone.now().timestamp()) + 600  # 10 minutes
+
+    return _json_response({
+        "intent_id": participation.id,
+        "receiver_wallet": receiver_wallet,
+        "usdt_amount": "15000000",  # 15 USDT (6 decimals)
+        "forward_ton": "50000000",  # 0.05 TON for fees
+        "comment": f"Soulpull:{participation.id}",
+        "valid_until": valid_until,
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payment_build_tx(request):
+    """
+    POST /api/v1/payment/build-tx
+    Builds TonConnect transaction payload for JettonTransfer.
+    
+    Req: { 
+        "participation_id": int,
+        "sender_wallet": "UQ..." 
+    }
+    Res: {
+        "valid_until": int,
+        "messages": [{
+            "address": "sender_jetton_wallet",
+            "amount": "50000000",
+            "payload": "base64_encoded_jetton_transfer"
+        }]
+    }
+    """
+    body, err = _parse_json_body(request)
+    if err:
+        return err
+
+    participation_id = body.get("participation_id")
+    sender_wallet = (body.get("sender_wallet") or "").strip()
+
+    if participation_id is None:
+        return _error_response("validation_error", "participation_id is required")
+    if not sender_wallet:
+        return _error_response("validation_error", "sender_wallet is required")
+
+    try:
+        participation = Participation.objects.get(id=int(participation_id))
+    except (Participation.DoesNotExist, ValueError):
+        return _error_response("not_found", "Participation not found", 404)
+
+    if participation.status not in [ParticipationStatus.NEW, ParticipationStatus.PENDING]:
+        return _error_response("invalid_status", f"Participation already {participation.status}")
+
+    receiver_wallet = os.getenv("RECEIVER_WALLET", "")
+    usdt_master = os.getenv("USDT_JETTON_MASTER", "")
+
+    if not receiver_wallet:
+        return _error_response("server_error", "RECEIVER_WALLET not configured", 500)
+    if not usdt_master:
+        return _error_response("server_error", "USDT_JETTON_MASTER not configured", 500)
+
+    # Get sender's jetton wallet
+    try:
+        sender_jetton_wallet = get_jetton_wallet_address(
+            owner_address=sender_wallet,
+            jetton_master_address=usdt_master
+        )
+    except ToncenterError as e:
+        return _error_response("toncenter_error", str(e), 502)
+
+    comment = f"Soulpull:{participation.id}"
+    valid_until = int(timezone.now().timestamp()) + 600
+
+    # Build simplified payload (comment only)
+    # In production, this would be proper TL-B encoded JettonTransfer cell
+    comment_bytes = comment.encode("utf-8")
+    payload_bytes = bytes([0, 0, 0, 0]) + comment_bytes  # op=0 (text comment)
+    payload_b64 = base64.b64encode(payload_bytes).decode("ascii")
+
+    # For MVP: return simple TON transfer to receiver
+    # Real implementation would build proper JettonTransfer message
+    return _json_response({
+        "valid_until": valid_until,
+        "messages": [
+            {
+                "address": sender_jetton_wallet,
+                "amount": "50000000",  # 0.05 TON for gas
+                "payload": payload_b64,
+            }
+        ],
+        "meta": {
+            "receiver": receiver_wallet,
+            "usdt_amount": "15000000",
+            "comment": comment,
+            "sender_jetton_wallet": sender_jetton_wallet,
+        }
+    })
 
 
 # ============================================================================

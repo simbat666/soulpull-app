@@ -3,72 +3,134 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#4F46E5">
-  <title>Soulpull</title>
+  <meta name="theme-color" content="#8b0000">
+  <meta name="description" content="Soulpull — Спасение душ из ада. Пригласи 3 друзей, получи 33 USDT.">
+  <title>Soulpull — Спасение Душ</title>
+  
+  <!-- Styles -->
   <link rel="stylesheet" href="/static/css/styles.css">
+  
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/tsparticles@2.12.0/tsparticles.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
   <script src="https://unpkg.com/@tonconnect/ui@2.0.0/dist/tonconnect-ui.min.js"></script>
 </head>
 <body>
+  <!-- Fire Particles Background -->
+  <div id="particles-js"></div>
+
+  <!-- Loading Overlay -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="spinner" style="width: 48px; height: 48px; border-width: 4px;"></div>
+    <div class="loading-text">Открываем врата...</div>
+  </div>
+
   <div class="app">
     <!-- Header -->
     <header class="header">
       <div class="logo">
-        <div class="logo-icon">S</div>
+        <div class="logo-icon">🔥</div>
         <span class="logo-text">Soulpull</span>
       </div>
-      <span class="version">MVP v2.0</span>
+      <span class="version">⚔️ MVP</span>
     </header>
 
     <!-- Banner: Not in Telegram -->
     <div id="banner-not-telegram" class="banner banner-warning hidden">
-      ⚠️ Запустите через Telegram WebApp для полного функционала.
+      ⚠️ Откройте через Telegram для полного функционала
     </div>
 
-    <!-- E1: Start -->
+    <!-- ================================================================
+         E1: ВРАТА АДА (Start Screen)
+         ================================================================ -->
     <section id="screen-start" class="screen active">
       <div class="card">
         <div class="hero">
-          <div class="hero-icon">💎</div>
-          <h1 class="hero-title">Добро пожаловать!</h1>
-          <p class="hero-subtitle">Пригласи 3 друзей — получи 33 USDT. Оплата 15 USDT за участие.</p>
+          <div class="hero-icon">👻</div>
+          <h1 class="hero-title">Спаси свою душу</h1>
+          <p class="hero-subtitle">
+            Вырвись из пламени ада! Приведи 3 души — получи 33 USDT. 
+            Цена спасения: 15 USDT.
+          </p>
+          <div class="hero-stats">
+            <div class="hero-stat">
+              <div class="hero-stat-value">15</div>
+              <div class="hero-stat-label">USDT вход</div>
+            </div>
+            <div class="hero-stat">
+              <div class="hero-stat-value">33</div>
+              <div class="hero-stat-label">USDT награда</div>
+            </div>
+            <div class="hero-stat">
+              <div class="hero-stat-value">3</div>
+              <div class="hero-stat-label">души</div>
+            </div>
+          </div>
         </div>
-        <button id="btn-start" class="btn btn-primary btn-lg">
-          Начать →
-        </button>
       </div>
+      
+      <button id="btn-start" class="btn btn-gold btn-lg">
+        🚪 Войти во врата
+      </button>
     </section>
 
-    <!-- E2: Wallet -->
+    <!-- ================================================================
+         E2: ПОДКЛЮЧЕНИЕ КОШЕЛЬКА (Wallet Screen)
+         ================================================================ -->
     <section id="screen-wallet" class="screen">
       <div class="card">
-        <h2 class="card-title">Подключите кошелёк</h2>
-        <p class="card-subtitle">Кошелёк = ваш аккаунт. Используем TON Proof для безопасной авторизации.</p>
+        <h2 class="card-title">🔗 Подключи кошелёк</h2>
+        <p class="card-subtitle">
+          Твой кошелёк — это душа в блокчейне. Подключи TON кошелёк для продолжения.
+        </p>
         
-        <div id="ton-connect-button" class="mb-4"></div>
+        <div id="ton-connect-button"></div>
         
-        <div id="wallet-status" class="banner banner-info hidden">
-          ✅ Кошелёк подключён
+        <div id="wallet-connected" class="wallet-info hidden">
+          <div class="wallet-icon">💎</div>
+          <div class="wallet-details">
+            <div class="wallet-label">Кошелёк подключён</div>
+            <div class="wallet-address" id="wallet-address-display">—</div>
+          </div>
+        </div>
+        
+        <div id="wallet-status" class="banner banner-success hidden">
+          ✅ Душа привязана к блокчейну
         </div>
       </div>
       
       <div class="nav-buttons">
         <button id="btn-wallet-next" class="btn btn-primary" disabled>
-          Далее: Реферал →
+          Продолжить путь →
         </button>
       </div>
     </section>
 
-    <!-- E3: Referral -->
+    <!-- ================================================================
+         E3: РЕФЕРЕР (Referral Screen)
+         ================================================================ -->
     <section id="screen-referral" class="screen">
       <div class="card">
-        <h2 class="card-title">Кто вас пригласил?</h2>
-        <p class="card-subtitle">Укажите telegram_id пригласившего. Это обязательно.</p>
+        <h2 class="card-title">👤 Кто тебя спас?</h2>
+        <p class="card-subtitle">
+          Укажи Telegram ID того, кто привёл тебя к вратам. 
+          Без проводника — не войти.
+        </p>
         
         <div class="form-group">
-          <label class="form-label">Telegram ID пригласившего</label>
-          <input type="text" id="input-referrer" class="form-input" placeholder="123456789" inputmode="numeric">
-          <p class="form-hint">Только цифры. Пригласивший должен быть уже оплачен.</p>
+          <label class="form-label">Telegram ID проводника</label>
+          <input 
+            type="text" 
+            id="input-referrer" 
+            class="form-input" 
+            placeholder="Например: 123456789"
+            inputmode="numeric"
+            autocomplete="off"
+          >
+          <p class="form-hint">💡 Только цифры. Проводник должен быть уже спасён.</p>
         </div>
+        
+        <div id="referrer-error" class="banner banner-error hidden"></div>
       </div>
       
       <div class="nav-buttons">
@@ -77,62 +139,92 @@
       </div>
     </section>
 
-    <!-- E4: Author Code -->
+    <!-- ================================================================
+         E4: КОД АВТОРА (Author Code Screen)
+         ================================================================ -->
     <section id="screen-author" class="screen">
       <div class="card">
-        <h2 class="card-title">Код автора (опционально)</h2>
-        <p class="card-subtitle">Если у вас есть авторский код — введите его. +10 поинтов вам и автору.</p>
+        <h2 class="card-title">📜 Код автора</h2>
+        <p class="card-subtitle">
+          Есть тайный код? Введи его — получишь +10 очков к карме. 
+          Можно пропустить.
+        </p>
         
         <div class="form-group">
-          <label class="form-label">Код автора</label>
-          <input type="text" id="input-author-code" class="form-input" placeholder="AUTHOR123">
-          <p class="form-hint">Можно пропустить</p>
+          <label class="form-label">Код автора (опционально)</label>
+          <input 
+            type="text" 
+            id="input-author-code" 
+            class="form-input" 
+            placeholder="DARKCODE123"
+            autocomplete="off"
+          >
+          <p class="form-hint">✨ Автор тоже получит +10 очков</p>
         </div>
       </div>
       
       <div class="nav-buttons">
         <button id="btn-author-back" class="btn btn-secondary">← Назад</button>
-        <button id="btn-author-next" class="btn btn-primary">Далее →</button>
+        <button id="btn-author-next" class="btn btn-primary">К оплате →</button>
       </div>
     </section>
 
-    <!-- E5: Payment -->
+    <!-- ================================================================
+         E5: ОПЛАТА (Payment Screen)
+         ================================================================ -->
     <section id="screen-payment" class="screen">
       <div class="card">
-        <h2 class="card-title">Оплата 15 USDT</h2>
-        <p class="card-subtitle">Нажмите кнопку для создания платежа. После оплаты — Страж подтвердит.</p>
+        <h2 class="card-title">💰 Цена спасения</h2>
+        <p class="card-subtitle">
+          Оплати 15 USDT — и твоя душа начнёт путь к свету. 
+          После оплаты Страж подтвердит транзакцию.
+        </p>
         
         <div id="payment-error" class="banner banner-error hidden"></div>
         
-        <div id="payment-details" class="hidden">
-          <div class="admin-item">
-            <div class="admin-item-details">
-              <strong>Получатель:</strong> <span id="payment-receiver"></span><br>
-              <strong>Сумма:</strong> 15 USDT<br>
-              <strong>Комментарий:</strong> <span id="payment-comment"></span>
-            </div>
+        <div class="payment-details" id="payment-details">
+          <div class="payment-amount">15 USDT</div>
+          <div class="payment-row">
+            <span class="payment-label">Получатель</span>
+            <span class="payment-value" id="payment-receiver">—</span>
+          </div>
+          <div class="payment-row">
+            <span class="payment-label">Комментарий</span>
+            <span class="payment-value" id="payment-comment">—</span>
+          </div>
+          <div class="payment-row" id="payment-intent-row" style="display: none;">
+            <span class="payment-label">Intent ID</span>
+            <span class="payment-value" id="payment-intent-id">—</span>
           </div>
         </div>
         
-        <button id="btn-pay" class="btn btn-success btn-lg mb-4">
-          💳 Оплатить 15 USDT
+        <button id="btn-pay-create" class="btn btn-gold btn-lg mb-4">
+          🔥 Создать платёж
         </button>
         
-        <button id="btn-pay-send" class="btn btn-primary hidden">
-          📤 Отправить через кошелёк
+        <button id="btn-pay-send" class="btn btn-success btn-lg hidden">
+          💳 Оплатить через кошелёк
         </button>
+        
+        <div id="payment-pending" class="banner banner-info hidden">
+          ⏳ Ожидаем подтверждения от Стража...
+        </div>
       </div>
       
       <div class="nav-buttons">
         <button id="btn-payment-back" class="btn btn-secondary">← Назад</button>
-        <button id="btn-payment-next" class="btn btn-primary" disabled>Готово →</button>
+        <button id="btn-payment-done" class="btn btn-primary" disabled>
+          Готово →
+        </button>
       </div>
     </section>
 
-    <!-- E6: Progress -->
+    <!-- ================================================================
+         E6: ПРОГРЕСС (Progress Screen)
+         ================================================================ -->
     <section id="screen-progress" class="screen">
       <div class="card">
-        <h2 class="card-title">Ваш статус</h2>
+        <h2 class="card-title">🏆 Твой путь к спасению</h2>
         
         <div class="text-center mb-4">
           <span id="participation-status" class="status-badge new">NEW</span>
@@ -140,7 +232,7 @@
         
         <div class="progress-counter">
           <div class="progress-number"><span id="l1-count">0</span>/3</div>
-          <div class="progress-label">оплаченных рефералов</div>
+          <div class="progress-label">спасённых душ</div>
         </div>
         
         <ul class="checklist">
@@ -150,27 +242,34 @@
           </li>
           <li class="checklist-item">
             <span id="check-l1" class="checklist-icon pending">○</span>
-            <span class="checklist-text">3 реферала оплатили</span>
+            <span class="checklist-text">3 души оплатили вход</span>
           </li>
           <li class="checklist-item">
             <span id="check-payout" class="checklist-icon pending">○</span>
-            <span class="checklist-text">Выплата доступна</span>
+            <span class="checklist-text">Награда доступна</span>
           </li>
         </ul>
       </div>
       
       <div class="card">
-        <button id="btn-tree" class="btn btn-outline mb-2">
-          🌳 Дерево L1
+        <h3 class="card-title" style="font-size: 18px;">📋 Твои действия</h3>
+        
+        <button id="btn-copy-link" class="btn btn-outline mb-2">
+          🔗 Скопировать реферальную ссылку
         </button>
-        <button id="btn-payout" class="btn btn-success" disabled>
-          💰 Запросить 33 USDT
+        
+        <button id="btn-tree" class="btn btn-secondary mb-2">
+          🌳 Дерево душ L1
+        </button>
+        
+        <button id="btn-payout" class="btn btn-gold" disabled>
+          💰 Забрать 33 USDT
         </button>
       </div>
       
       <div class="nav-buttons">
         <button id="btn-strazh" class="btn btn-secondary">
-          🛡️ Страж (админ)
+          🛡️ Страж
         </button>
         <button id="btn-refresh" class="btn btn-primary">
           🔄 Обновить
@@ -178,57 +277,79 @@
       </div>
     </section>
 
-    <!-- E7: Tree -->
+    <!-- ================================================================
+         E7: ДЕРЕВО ДУШL1 (Tree Screen)
+         ================================================================ -->
     <section id="screen-tree" class="screen">
       <div class="card">
-        <h2 class="card-title">Ваши рефералы L1</h2>
-        <p class="card-subtitle">Слоты: <span id="slots-used">0</span>/3</p>
+        <h2 class="card-title">🌳 Дерево твоих душ</h2>
+        <p class="card-subtitle">
+          Слоты: <span id="slots-used" class="text-fire">0</span>/3 заняты
+        </p>
         
         <ul id="referral-list" class="referral-list">
           <!-- Dynamic content -->
         </ul>
         
         <div id="tree-empty" class="text-center text-muted mt-4">
-          Пока нет рефералов
+          <p style="font-size: 48px; margin-bottom: 12px;">👻</p>
+          <p>Пока никого нет. Приведи души!</p>
         </div>
       </div>
       
       <div class="nav-buttons">
-        <button id="btn-tree-back" class="btn btn-primary">← Назад к прогрессу</button>
+        <button id="btn-tree-back" class="btn btn-primary">
+          ← Назад к прогрессу
+        </button>
       </div>
     </section>
 
-    <!-- E8: Strazh (Admin) -->
+    <!-- ================================================================
+         E8: СТРАЖ (Admin Panel)
+         ================================================================ -->
     <section id="screen-strazh" class="screen">
       <div class="card">
         <h2 class="card-title">🛡️ Страж</h2>
-        <p class="card-subtitle">Ручное подтверждение платежей (MVP)</p>
+        <p class="card-subtitle">Панель подтверждения платежей (только для админов)</p>
         
-        <div id="strazh-login" class="form-group">
-          <label class="form-label">Admin Token</label>
-          <input type="password" id="input-admin-token" class="form-input" placeholder="Введите токен">
-          <button id="btn-admin-login" class="btn btn-primary mt-2">Войти</button>
+        <div id="strazh-login">
+          <div class="form-group">
+            <label class="form-label">Токен Стража</label>
+            <input 
+              type="password" 
+              id="input-admin-token" 
+              class="form-input" 
+              placeholder="Введите секретный токен"
+            >
+          </div>
+          <button id="btn-admin-login" class="btn btn-primary">
+            🔓 Войти как Страж
+          </button>
         </div>
         
         <div id="strazh-panel" class="hidden">
           <div class="admin-section">
             <h3 class="admin-section-title">Ожидают подтверждения</h3>
             <div id="pending-list">
-              <!-- Dynamic content -->
+              <p class="text-muted">Загрузка...</p>
             </div>
           </div>
+          
+          <div class="divider"></div>
           
           <div class="admin-section">
             <h3 class="admin-section-title">Заявки на выплату</h3>
             <div id="payout-list">
-              <!-- Dynamic content -->
+              <p class="text-muted">Загрузка...</p>
             </div>
           </div>
         </div>
       </div>
       
       <div class="nav-buttons">
-        <button id="btn-strazh-back" class="btn btn-secondary">← Назад</button>
+        <button id="btn-strazh-back" class="btn btn-secondary">
+          ← Назад
+        </button>
       </div>
     </section>
 
@@ -236,7 +357,7 @@
     <div id="toast" class="toast"></div>
   </div>
 
+  <!-- Main App Script -->
   <script src="/static/js/app.js"></script>
 </body>
 </html>
-

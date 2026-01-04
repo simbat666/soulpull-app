@@ -13,7 +13,7 @@ import os
 
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
-from django.urls import include, path
+from django.urls import include, path, re_path
 from django.views.decorators.csrf import csrf_exempt
 
 
@@ -106,4 +106,14 @@ urlpatterns = [
     
     # SPA
     path("", index, name="index"),
+    # SPA deep links (anything else should load the app, not 404)
+    # Keep this LAST so it doesn't shadow real endpoints above.
+    re_path(r"^(?!api/v1/|static/|admin/).*$", index, name="spa_fallback"),
+]
+
+# Serve static files in development (works regardless of DEBUG setting)
+from django.conf.urls.static import static
+from django.views.static import serve
+urlpatterns += [
+    re_path(r'^static/(?P<path>.*)$', serve, {'document_root': settings.BASE_DIR / 'frontend' / 'static'}),
 ]

@@ -24,8 +24,10 @@ urlpatterns = [
     path("payout", views.payout, name="payout"),
     path("payout/mark", views.payout_mark, name="payout_mark"),
     
-    # Jetton wallet
+    # Jetton wallet & payment
     path("jetton/wallet", views.jetton_wallet, name="jetton_wallet"),
+    path("payment/intent", views.payment_intent, name="payment_intent"),
+    path("payment/build-tx", views.payment_build_tx, name="payment_build_tx"),
     
     # TON Proof
     path("tonproof/payload", views.tonproof_payload, name="tonproof_payload"),
