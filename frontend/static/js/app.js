@@ -260,19 +260,33 @@
       const manifestUrl = window.location.origin + '/tonconnect-manifest.json';
       console.log('[TonConnect] Init with manifest:', manifestUrl);
       
+      // Определяем есть ли Telegram WebApp
+      const tg = window.Telegram?.WebApp;
+      const isTelegram = !!tg;
+      
       tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
         manifestUrl,
         buttonRootId: 'ton-connect-button',
         restoreConnection: true,
         actionsConfiguration: {
-          // Не редиректить на сайты кошельков — только QR код
-          twaReturnUrl: window.location.origin,
-          returnStrategy: 'back',
+          // Для Telegram Mini App - вернуться в приложение после подтверждения
+          twaReturnUrl: isTelegram ? window.location.href : undefined,
+          returnStrategy: isTelegram ? 'back' : 'none',
+          // Показывать модалку подтверждения если не в Telegram
+          modals: isTelegram ? undefined : 'all',
+          // Пропускать редиректы на десктопе
+          skipRedirectToWallet: !isTelegram ? 'ios' : undefined,
         },
         uiPreferences: {
           theme: 'DARK',
         },
+        // Приоритизировать Telegram Wallet если в Telegram
+        walletsListConfiguration: isTelegram ? {
+          includeWallets: ['telegram-wallet', 'tonkeeper', 'mytonwallet'],
+        } : undefined,
       });
+      
+      console.log('[TonConnect] Running in:', isTelegram ? 'Telegram Mini App' : 'Browser');
 
       // Слушатель изменений — асинхронно, не блокирует
       tonConnectUI.onStatusChange((wallet) => {
@@ -634,50 +648,31 @@
       
       try {
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Отправка...';
+        btn.innerHTML = '<span class="spinner"></span> Открываем кошелёк...';
         
-        // Получаем receiver wallet из health
-        let receiverWallet;
-        try {
-          const health = await api('/health');
-          // Полный адрес из .env (не укороченный)
-          receiverWallet = CONFIG.RECEIVER_WALLET || 'UQBvW8Z5huBkMJYdnfAEM5JqTNLuDP2v3cJNfX1RJ8aRyZ2C';
-        } catch (e) {
-          receiverWallet = 'UQBvW8Z5huBkMJYdnfAEM5JqTNLuDP2v3cJNfX1RJ8aRyZ2C';
-        }
+        // Receiver wallet address (TON mainnet format)
+        const receiverWallet = CONFIG.RECEIVER_WALLET;
+        const comment = `Soulpull:${state.participationId || 1}`;
         
-        // Build transaction - простой TON transfer с комментарием
-        const comment = `Soulpull:${state.participationId}`;
-        
-        // Encode comment as Cell payload (text comment format)
-        // Format: 0x00000000 + UTF-8 text
-        const textEncoder = new TextEncoder();
-        const commentBytes = textEncoder.encode(comment);
-        const payload = new Uint8Array(4 + commentBytes.length);
-        payload.set([0, 0, 0, 0], 0); // op code for text comment
-        payload.set(commentBytes, 4);
-        const payloadBase64 = btoa(String.fromCharCode(...payload));
-        
+        // Простой TON transfer БЕЗ payload - максимально совместимый формат
         const transaction = {
-          validUntil: Math.floor(Date.now() / 1000) + CONFIG.TX_VALID_SECONDS,
+          validUntil: Math.floor(Date.now() / 1000) + 600, // 10 минут
           messages: [
             {
               address: receiverWallet,
-              amount: '100000000', // 0.1 TON for test (in production: USDT jetton transfer)
-              payload: payloadBase64,
+              amount: '100000000', // 0.1 TON
             }
           ],
         };
         
-        console.log('[Payment] Sending transaction:', transaction);
-        console.log('[Payment] Receiver:', receiverWallet);
-        console.log('[Payment] Comment:', comment);
+        console.log('[Payment] Sending simple transaction:', transaction);
+        console.log('[Payment] To:', receiverWallet);
         
-        // Показать подсказку перед отправкой
-        showToast('📱 Подтверди транзакцию в кошельке на телефоне!', 'info');
+        showToast('📱 Подтверди в кошельке!', 'info');
         
+        // Отправляем транзакцию - откроется кошелёк
         const result = await tonConnectUI.sendTransaction(transaction);
-        console.log('[Payment] Transaction result:', result);
+        console.log('[Payment] Transaction sent! Result:', result);
         
         // Show pending status
         $('btn-pay-send')?.classList.add('hidden');
