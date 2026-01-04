@@ -23,15 +23,15 @@ class SecurityHeadersMiddleware:
     def __call__(self, request):
         response = self.get_response(request)
 
-        # CSP - allow TonConnect UI from CDN
+        # CSP - allow TonConnect UI from CDN and all required endpoints
         csp_parts = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net",
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://telegram.org",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
             "font-src 'self' https://fonts.gstatic.com data:",
             "img-src 'self' data: https: blob:",
-            "connect-src 'self' https://bridge.tonapi.io https://tonapi.io wss://bridge.tonapi.io https://toncenter.com",
-            "frame-src 'self' https://t.me",
+            "connect-src 'self' https: wss:",  # Allow all HTTPS/WSS for TonConnect bridges
+            "frame-src 'self' https://t.me https://telegram.org",
             "worker-src 'self' blob:",
         ]
         response["Content-Security-Policy"] = "; ".join(csp_parts)

@@ -201,20 +201,23 @@
   function initTelegram() {
     const tg = window.Telegram?.WebApp;
     
-    if (tg) {
+    console.log('[Telegram] WebApp object:', tg ? 'exists' : 'not found');
+    console.log('[Telegram] initData:', tg?.initData || '(empty)');
+    console.log('[Telegram] initDataUnsafe:', JSON.stringify(tg?.initDataUnsafe || {}));
+    
+    if (tg && tg.initDataUnsafe?.user) {
+      // Реальный Telegram WebApp с данными пользователя
       tg.ready();
       tg.expand();
-      tg.enableClosingConfirmation();
+      try { tg.enableClosingConfirmation(); } catch(e) {}
       
       // Set theme
       document.documentElement.style.setProperty('--tg-bg', tg.backgroundColor || '#0a0505');
       
-      const user = tg.initDataUnsafe?.user;
-      if (user) {
-        state.telegramId = user.id;
-        state.username = user.username || user.first_name || `User${user.id}`;
-        console.log('[Telegram] User:', state.telegramId, state.username);
-      }
+      const user = tg.initDataUnsafe.user;
+      state.telegramId = user.id;
+      state.username = user.username || user.first_name || `User${user.id}`;
+      console.log('[Telegram] ✅ User from TG:', state.telegramId, state.username);
       
       // Check start_param for referrer
       const startParam = tg.initDataUnsafe?.start_param;
@@ -228,17 +231,17 @@
       $('banner-not-telegram')?.classList.add('hidden');
       return true;
     } else {
-      // Not in Telegram — dev mode
+      // Telegram WebApp без данных или не в Telegram
+      console.log('[Telegram] ⚠️ No user data — using dev mode');
       $('banner-not-telegram')?.classList.remove('hidden');
       
-      // Auto-assign dev telegram_id (без блокирующего prompt)
-      // Можно изменить в консоли: state.telegramId = 12345
+      // URL params или saved state для dev mode
       const urlParams = new URLSearchParams(window.location.search);
-      const devTid = urlParams.get('tid') || '123456789';
+      const devTid = urlParams.get('tid') || state.telegramId || '123456789';
       
       state.telegramId = parseInt(devTid);
-      state.username = 'dev_user_' + devTid;
-      console.log('[Dev] Auto telegram_id:', state.telegramId, '(add ?tid=XXX to URL to change)');
+      state.username = state.username || 'dev_user_' + devTid;
+      console.log('[Dev] telegram_id:', state.telegramId, '(add ?tid=XXX to URL to change)');
       return true;
     }
   }
