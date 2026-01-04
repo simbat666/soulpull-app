@@ -618,17 +618,58 @@
       const btn = $('btn-pay-send');
       const originalText = btn.innerHTML;
       
-      // Если кошелёк не подключён — вернуть на экран wallet
       if (!tonConnectUI) {
         showToast('TonConnect не инициализирован', 'error');
         return;
       }
       
+      // Если кошелёк не подключён — подключить и сразу оплатить
       if (!tonConnectUI.connected) {
-        showToast('⚠️ Сначала подключи кошелёк!', 'error');
-        // Вернуть на экран wallet для подключения
-        showScreen('screen-wallet');
-        return;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Подключаем кошелёк...';
+        
+        try {
+          // Открыть модалку TonConnect
+          await tonConnectUI.openModal();
+          
+          // Ждём подключения
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('Время ожидания истекло'));
+            }, 120000); // 2 минуты на подключение
+            
+            const unsubscribe = tonConnectUI.onStatusChange((wallet) => {
+              if (wallet) {
+                clearTimeout(timeout);
+                unsubscribe();
+                state.walletAddress = wallet.account.address;
+                saveState();
+                console.log('[Payment] Wallet connected:', wallet.account.address);
+                resolve(wallet);
+              }
+            });
+            
+            // Также слушаем закрытие модалки
+            const checkClosed = setInterval(() => {
+              if (!tonConnectUI.modal.state.status || tonConnectUI.modal.state.status === 'closed') {
+                clearInterval(checkClosed);
+                clearTimeout(timeout);
+                unsubscribe();
+                reject(new Error('Подключение отменено'));
+              }
+            }, 500);
+          });
+          
+          showToast('✅ Кошелёк подключён!', 'success');
+          btn.innerHTML = '<span class="spinner"></span> Отправляем транзакцию...';
+          
+        } catch (e) {
+          console.warn('[Payment] Connection failed:', e);
+          showToast(e.message || 'Подключите кошелёк', 'error');
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          return;
+        }
       }
       
       try {
