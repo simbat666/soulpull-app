@@ -264,6 +264,14 @@
         manifestUrl,
         buttonRootId: 'ton-connect-button',
         restoreConnection: true,
+        actionsConfiguration: {
+          // Не редиректить на сайты кошельков — только QR код
+          twaReturnUrl: window.location.origin,
+          returnStrategy: 'back',
+        },
+        uiPreferences: {
+          theme: 'DARK',
+        },
       });
 
       // Слушатель изменений — асинхронно, не блокирует
@@ -610,40 +618,17 @@
       const btn = $('btn-pay-send');
       const originalText = btn.innerHTML;
       
-      // Если кошелёк не подключён — открыть модальное окно подключения
+      // Если кошелёк не подключён — вернуть на экран wallet
       if (!tonConnectUI) {
         showToast('TonConnect не инициализирован', 'error');
         return;
       }
       
       if (!tonConnectUI.connected) {
-        console.log('[Payment] Wallet not connected, opening modal...');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Подключаем...';
-        
-        try {
-          await tonConnectUI.openModal();
-          // Wait for connection
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Connection timeout')), 60000);
-            const unsubscribe = tonConnectUI.onStatusChange((wallet) => {
-              if (wallet) {
-                clearTimeout(timeout);
-                unsubscribe();
-                state.walletAddress = wallet.account.address;
-                saveState();
-                resolve();
-              }
-            });
-          });
-          showToast('✅ Кошелёк подключён!', 'success');
-        } catch (e) {
-          console.warn('[Payment] Connection failed:', e);
-          showToast('Подключите кошелёк', 'error');
-          btn.disabled = false;
-          btn.innerHTML = originalText;
-          return;
-        }
+        showToast('⚠️ Сначала подключи кошелёк!', 'error');
+        // Вернуть на экран wallet для подключения
+        showScreen('screen-wallet');
+        return;
       }
       
       try {
