@@ -151,10 +151,16 @@ def _create_intent(
     Returns (participation, used_slots).
     Raises ValueError or RuntimeError on failure.
     """
-    # Check active cycle
-    if _active_participation(user):
-        RiskEvent.objects.create(user=user, kind=RiskEventKind.ACTIVE_CYCLE, meta={"action": "intent"})
-        raise ValueError("active_cycle")
+    # Check active cycle — if exists with status NEW, return it (idempotent)
+    existing = _active_participation(user)
+    if existing:
+        if existing.status == ParticipationStatus.NEW:
+            # Return existing NEW participation — user can retry payment
+            logger.info(f"[INTENT] {user.telegram_id} returning existing NEW participation #{existing.id}")
+            return existing, 0  # Return existing, slots don't matter
+        else:
+            RiskEvent.objects.create(user=user, kind=RiskEventKind.ACTIVE_CYCLE, meta={"action": "intent"})
+            raise ValueError("active_cycle")
 
     # Find referrer
     referrer = None
