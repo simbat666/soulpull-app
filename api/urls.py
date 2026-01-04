@@ -24,10 +24,15 @@ urlpatterns = [
     path("payout", views.payout, name="payout"),
     path("payout/mark", views.payout_mark, name="payout_mark"),
     
-    # Jetton wallet & payment
+    # Jetton wallet & payment (legacy)
     path("jetton/wallet", views.jetton_wallet, name="jetton_wallet"),
     path("payment/intent", views.payment_intent, name="payment_intent"),
     path("payment/build-tx", views.payment_build_tx, name="payment_build_tx"),
+    
+    # Payment Orders (TonConnect + TonAPI verification)
+    path("payments/create", views.payment_create_order, name="payment_create_order"),
+    path("payments/<str:order_id>/status", views.payment_order_status, name="payment_order_status"),
+    path("payments/confirm", views.payment_manual_confirm, name="payment_manual_confirm"),
     
     # TON Proof
     path("tonproof/payload", views.tonproof_payload, name="tonproof_payload"),

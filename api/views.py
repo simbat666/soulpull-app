@@ -38,6 +38,8 @@ from .models import (
     IdempotencyKey,
     Participation,
     ParticipationStatus,
+    PaymentOrder,
+    PaymentOrderStatus,
     PayoutRequest,
     PayoutStatus,
     RiskEvent,
@@ -46,6 +48,7 @@ from .models import (
     UserProfile,
 )
 from .services.toncenter import ToncenterError, get_jetton_wallet_address
+from .services.tonapi import verify_payment, TonApiError
 
 logger = logging.getLogger(__name__)
 
@@ -1033,3 +1036,187 @@ def admin_payouts_open(request):
                 for p in qs
             ]
     })
+
+
+# ============================================================================
+# PAYMENT ORDERS (TonConnect + TonAPI verification)
+# ============================================================================
+
+# Конфигурация из .env
+PAYMENT_RECEIVER_TON = os.getenv("PAYMENT_RECEIVER_TON", "")
+PAYMENT_TON_AMOUNT_NANO = int(os.getenv("PAYMENT_TON_AMOUNT_NANO", "100000000"))  # 0.1 TON default
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payment_create_order(request):
+    """
+    POST /api/v1/payments/create
+    Req: { "wallet_address": "UQ...", "telegram_id": int }
+    Res: { "ok": true, "order_id": "...", "receiver": "...", "amount_nano": int, "tx": {...} }
+    
+    Создаёт заказ на оплату и возвращает tx object для TonConnect.sendTransaction()
+    """
+    body, err = _parse_json_body(request)
+    if err:
+        return err
+    
+    wallet_address = (body.get("wallet_address") or "").strip()
+    telegram_id = body.get("telegram_id")
+    
+    if not wallet_address:
+        return _error_response("validation", "wallet_address required", 400)
+    
+    if not PAYMENT_RECEIVER_TON:
+        return _error_response("server_error", "Payment receiver not configured", 500)
+    
+    # Найти пользователя если передан telegram_id
+    user = None
+    participation = None
+    if telegram_id:
+        user = UserProfile.objects.filter(telegram_id=telegram_id).first()
+        if user:
+            # Найти активное участие
+            participation = Participation.objects.filter(
+                user=user,
+                status__in=[ParticipationStatus.NEW, ParticipationStatus.PENDING]
+            ).first()
+    
+    # Создаём заказ
+    public_id = PaymentOrder.new_public_id()
+    comment = f"SP:{public_id}"  # Уникальный комментарий для идентификации
+    
+    order = PaymentOrder.objects.create(
+        public_id=public_id,
+        user=user,
+        participation=participation,
+        wallet_address=wallet_address,
+        amount_nano=PAYMENT_TON_AMOUNT_NANO,
+        comment=comment,
+        status=PaymentOrderStatus.PENDING,
+        created_at=timezone.now(),
+        expires_at=timezone.now() + timezone.timedelta(minutes=30),
+    )
+    
+    logger.info(f"[Payment] Created order {public_id} for wallet {wallet_address}")
+    
+    # TonConnect tx template
+    tx = {
+        "validUntil": int(timezone.now().timestamp()) + 600,  # 10 минут
+        "messages": [
+            {
+                "address": PAYMENT_RECEIVER_TON,
+                "amount": str(PAYMENT_TON_AMOUNT_NANO),
+            }
+        ]
+    }
+    
+    return _json_response({
+        "ok": True,
+        "order_id": order.public_id,
+        "receiver": PAYMENT_RECEIVER_TON,
+        "amount_nano": order.amount_nano,
+        "amount_ton": order.amount_nano / 1e9,
+        "comment": order.comment,
+        "tx": tx,
+    }, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def payment_order_status(request, order_id: str):
+    """
+    GET /api/v1/payments/<order_id>/status
+    Res: { "ok": true, "status": "pending|paid|expired" }
+    
+    Проверяет статус заказа. Если pending — проверяет через TonAPI.
+    """
+    try:
+        order = PaymentOrder.objects.get(public_id=order_id)
+    except PaymentOrder.DoesNotExist:
+        return _error_response("not_found", "Order not found", 404)
+    
+    # Уже оплачен
+    if order.status == PaymentOrderStatus.PAID:
+        return _json_response({
+            "ok": True,
+            "status": "paid",
+            "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+        })
+    
+    # Истёк
+    if order.is_expired():
+        if order.status != PaymentOrderStatus.EXPIRED:
+            order.status = PaymentOrderStatus.EXPIRED
+            order.save(update_fields=["status"])
+        return _json_response({"ok": True, "status": "expired"})
+    
+    # Проверяем через TonAPI
+    if PAYMENT_RECEIVER_TON and order.wallet_address:
+        try:
+            hit = verify_payment(
+                receiver_address=PAYMENT_RECEIVER_TON,
+                sender_address=order.wallet_address,
+                amount_nano=order.amount_nano,
+                order_id=order.public_id,  # Ищем комментарий SP:<order_id>
+            )
+            
+            if hit:
+                logger.info(f"[Payment] Order {order_id} paid! event_id={hit.get('event_id')}")
+                order.mark_paid(
+                    event_id=hit.get("event_id", ""),
+                    tx_hash=hit.get("tx_hash", ""),
+                )
+                return _json_response({
+                    "ok": True,
+                    "status": "paid",
+                    "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+                    "tx_hash": hit.get("tx_hash", ""),
+                })
+                
+        except TonApiError as e:
+            logger.warning(f"[Payment] TonAPI check failed: {e}")
+            # Не фейлим — просто возвращаем pending
+    
+    return _json_response({"ok": True, "status": "pending"})
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def payment_manual_confirm(request):
+    """
+    POST /api/v1/payments/confirm
+    Req: { "order_id": "...", "tx_hash": "..." }
+    Res: { "ok": true }
+    
+    Ручное подтверждение оплаты (админ или для теста).
+    """
+    # Проверка админа или TEST_MODE
+    is_test = os.getenv("TEST_MODE", "0") == "1"
+    if not is_test:
+        admin_err = _require_admin(request)
+        if admin_err:
+            return admin_err
+    
+    body, err = _parse_json_body(request)
+    if err:
+        return err
+    
+    order_id = body.get("order_id")
+    tx_hash = body.get("tx_hash", "")
+    
+    if not order_id:
+        return _error_response("validation", "order_id required", 400)
+    
+    try:
+        order = PaymentOrder.objects.get(public_id=order_id)
+    except PaymentOrder.DoesNotExist:
+        return _error_response("not_found", "Order not found", 404)
+    
+    if order.status == PaymentOrderStatus.PAID:
+        return _json_response({"ok": True, "message": "Already paid"})
+    
+    order.mark_paid(tx_hash=tx_hash)
+    logger.info(f"[Payment] Order {order_id} manually confirmed")
+    
+    return _json_response({"ok": True})

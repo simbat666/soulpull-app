@@ -47,8 +47,8 @@
     participationId: null,
     participationStatus: null,
     
-    // Payment intent
-    paymentIntent: null,
+    // Payment order (TonConnect + TonAPI)
+    paymentOrderId: null,
     
     // Navigation flags (forward-only)
     leftStart: false,
@@ -128,6 +128,7 @@
         authorCode: state.authorCode,
         participationId: state.participationId,
         participationStatus: state.participationStatus,
+        paymentOrderId: state.paymentOrderId,
         leftStart: state.leftStart,
         leftWallet: state.leftWallet,
       };
@@ -476,6 +477,55 @@
     });
   }
 
+  /**
+   * Поллинг статуса оплаты через backend (который проверяет TonAPI)
+   * @param {string} orderId - ID заказа
+   * @param {number} maxAttempts - максимум попыток (по умолчанию 40 = ~2 минуты)
+   * @param {number} intervalMs - интервал между попытками (по умолчанию 3 секунды)
+   * @returns {Promise<boolean>} - true если оплачено
+   */
+  async function pollPaymentStatus(orderId, maxAttempts = 40, intervalMs = 3000) {
+    console.log(`[Payment] Starting poll for order ${orderId}...`);
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        console.log(`[Payment] Poll attempt ${i + 1}/${maxAttempts}...`);
+        
+        const response = await api(`/payments/${orderId}/status`);
+        
+        console.log(`[Payment] Status response:`, response);
+        
+        if (response.ok && response.status === 'paid') {
+          console.log(`[Payment] ✅ Order ${orderId} is PAID!`);
+          return true;
+        }
+        
+        if (response.status === 'expired') {
+          console.log(`[Payment] ❌ Order ${orderId} expired`);
+          return false;
+        }
+        
+        // Ждём перед следующей попыткой
+        await sleep(intervalMs);
+        
+      } catch (err) {
+        console.warn(`[Payment] Poll error:`, err);
+        // Продолжаем поллить даже при ошибках
+        await sleep(intervalMs);
+      }
+    }
+    
+    console.log(`[Payment] Poll timeout for order ${orderId}`);
+    return false;
+  }
+
+  /**
+   * Утилита для ожидания
+   */
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   async function registerAndLinkWallet() {
     if (!state.telegramId) {
       console.warn('[API] No telegram_id, skipping registration');
@@ -754,7 +804,10 @@
       }
     });
 
-    // SEND PAYMENT VIA TONCONNECT
+    // SEND PAYMENT VIA TONCONNECT (правильный флоу)
+    // 1. Создаём заказ на backend → получаем tx object
+    // 2. Отправляем транзакцию через TonConnect
+    // 3. Поллим статус заказа (backend проверяет через TonAPI)
     $('btn-pay-send')?.addEventListener('click', async () => {
       const btn = $('btn-pay-send');
       const originalText = btn.innerHTML;
@@ -771,43 +824,92 @@
         return;
       }
       
+      // Проверяем подключение кошелька
+      if (!tonConnectUI.connected || !tonConnectUI.wallet) {
+        showToast('⚠️ Сначала подключи кошелёк!', 'error');
+        await tonConnectUI.openModal();
+        return;
+      }
+      
+      const userWalletAddress = tonConnectUI.wallet.account.address;
+      
       try {
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Подготовка...';
+        btn.innerHTML = '<span class="spinner"></span> Создаём заказ...';
         
-        // Адрес получателя
-        const receiverWallet = CONFIG.RECEIVER_WALLET;
-        // Сумма в nanoTON (0.1 TON = 100000000 nanoTON)
-        const amountNano = 100000000;
-        // Комментарий
-        const comment = state.participationId ? `Soulpull:${state.participationId}` : 'Soulpull';
+        // ====== STEP 1: Создаём заказ на backend ======
+        console.log('[Payment] Step 1: Creating order...');
+        const orderResult = await api('/payments/create', {
+          method: 'POST',
+          body: JSON.stringify({
+            wallet_address: userWalletAddress,
+            telegram_id: state.telegramId,
+          }),
+        });
         
-        console.log('[Payment] Receiver:', receiverWallet);
-        console.log('[Payment] Amount:', amountNano, 'nanoTON (', amountNano / 1e9, 'TON)');
-        console.log('[Payment] Comment:', comment);
+        console.log('[Payment] Order created:', orderResult);
         
-        // Показываем тост перед открытием кошелька
+        if (!orderResult.ok) {
+          throw new Error(orderResult.error || 'Failed to create order');
+        }
+        
+        const orderId = orderResult.order_id;
+        const tx = orderResult.tx;
+        
+        // Сохраняем order_id
+        state.paymentOrderId = orderId;
+        saveState();
+        
+        // Обновляем UI с данными заказа
+        $('payment-receiver').textContent = orderResult.receiver;
+        $('payment-comment').textContent = orderResult.comment;
+        
+        // ====== STEP 2: Отправляем транзакцию через TonConnect ======
+        console.log('[Payment] Step 2: Sending transaction via TonConnect...');
+        console.log('[Payment] TX object:', tx);
+        
+        btn.innerHTML = '<span class="spinner"></span> Подтверди в кошельке...';
+        
         if (isTelegramMiniApp()) {
           showToast('📱 Откроется кошелёк для подтверждения...', 'info');
         } else {
           showToast('📱 Подтверди транзакцию в кошельке!', 'info');
         }
         
-        btn.innerHTML = '<span class="spinner"></span> Открываем кошелёк...';
+        // Отправляем транзакцию (откроется кошелёк)
+        const txResult = await tonConnectUI.sendTransaction(tx);
         
-        // Отправляем транзакцию через нашу функцию
-        const result = await sendTonTransaction(receiverWallet, amountNano, comment);
+        console.log('[Payment] ✅ Transaction sent!', txResult);
         
-        console.log('[Payment] ✅ SUCCESS!');
-        console.log('[Payment] Result:', result);
+        // ====== STEP 3: Поллим статус заказа ======
+        btn.innerHTML = '<span class="spinner"></span> Проверяем оплату...';
+        showToast('⏳ Проверяем оплату в блокчейне...', 'info');
         
-        // Успех! Показываем статус ожидания
-        btn.classList.add('hidden');
-        $('payment-pending')?.classList.remove('hidden');
-        const doneBtn = $('btn-payment-done');
-        if (doneBtn) doneBtn.disabled = false;
+        console.log('[Payment] Step 3: Polling order status...');
         
-        showToast('✅ Транзакция отправлена! Ожидаем подтверждения.', 'success');
+        const paid = await pollPaymentStatus(orderId);
+        
+        if (paid) {
+          console.log('[Payment] ✅ Payment confirmed!');
+          
+          // Успех! Показываем статус
+          btn.classList.add('hidden');
+          $('payment-pending')?.classList.remove('hidden');
+          const doneBtn = $('btn-payment-done');
+          if (doneBtn) doneBtn.disabled = false;
+          
+          showToast('✅ Оплата получена! Спасибо!', 'success');
+        } else {
+          console.log('[Payment] ⏳ Payment not yet confirmed');
+          
+          // Транзакция отправлена, но ещё не подтверждена
+          btn.classList.add('hidden');
+          $('payment-pending')?.classList.remove('hidden');
+          const doneBtn = $('btn-payment-done');
+          if (doneBtn) doneBtn.disabled = false;
+          
+          showToast('⏳ Транзакция отправлена. Ожидаем подтверждения в сети...', 'info');
+        }
         
       } catch (err) {
         console.error('[Payment] ❌ ERROR:', err);
@@ -815,7 +917,7 @@
         console.error('[Payment] Error message:', err.message);
         
         // Определяем текст ошибки
-        let errorMsg = 'Ошибка отправки';
+        let errorMsg = 'Ошибка оплаты';
         
         const msg = err.message?.toLowerCase() || '';
         if (msg.includes('reject') || msg.includes('cancel') || msg.includes('declined') || msg.includes('user')) {
