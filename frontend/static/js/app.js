@@ -248,7 +248,10 @@
   // TON CONNECT
   // ============================================================================
 
-  async function initTonConnect() {
+  function initTonConnect() {
+    // Инициализация TonConnect БЕЗ блокировки UI
+    // Всё происходит асинхронно в фоне
+    
     try {
       const manifestUrl = window.location.origin + '/tonconnect-manifest.json';
       console.log('[TonConnect] Init with manifest:', manifestUrl);
@@ -256,31 +259,30 @@
       tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
         manifestUrl,
         buttonRootId: 'ton-connect-button',
+        restoreConnection: true,
       });
 
-      // Listen for connection changes
-      tonConnectUI.onStatusChange(async (wallet) => {
+      // Слушатель изменений — асинхронно, не блокирует
+      tonConnectUI.onStatusChange((wallet) => {
         console.log('[TonConnect] Status changed:', wallet ? 'connected' : 'disconnected');
         
         if (wallet) {
           state.walletAddress = wallet.account.address;
           console.log('[TonConnect] Wallet:', state.walletAddress);
           
-          // Update UI
           $('wallet-status')?.classList.remove('hidden');
           $('wallet-connected')?.classList.remove('hidden');
-          $('btn-wallet-next').disabled = false;
+          const nextBtn = $('btn-wallet-next');
+          if (nextBtn) nextBtn.disabled = false;
           
-          // Display shortened address
           const addrDisplay = $('wallet-address-display');
           if (addrDisplay) {
             const addr = state.walletAddress;
             addrDisplay.textContent = addr.slice(0, 6) + '...' + addr.slice(-6);
           }
           
-          // Register user and link wallet
           if (state.telegramId) {
-            await registerAndLinkWallet();
+            registerAndLinkWallet(); // Без await
           }
           
           saveState();
@@ -288,29 +290,33 @@
           state.walletAddress = null;
           $('wallet-status')?.classList.add('hidden');
           $('wallet-connected')?.classList.add('hidden');
-          $('btn-wallet-next').disabled = true;
+          const nextBtn = $('btn-wallet-next');
+          if (nextBtn) nextBtn.disabled = true;
           saveState();
         }
       });
 
-      // Restore connection
-      const connected = await tonConnectUI.connectionRestored;
-      console.log('[TonConnect] Connection restored:', connected);
+      // Восстановление сессии — в фоне, не блокирует UI
+      tonConnectUI.connectionRestored
+        .then((connected) => {
+          console.log('[TonConnect] Connection restored:', connected);
+          if (connected && tonConnectUI.wallet) {
+            state.walletAddress = tonConnectUI.wallet.account.address;
+            $('wallet-status')?.classList.remove('hidden');
+            $('wallet-connected')?.classList.remove('hidden');
+            const nextBtn = $('btn-wallet-next');
+            if (nextBtn) nextBtn.disabled = false;
+            
+            const addrDisplay = $('wallet-address-display');
+            if (addrDisplay) {
+              const addr = state.walletAddress;
+              addrDisplay.textContent = addr.slice(0, 6) + '...' + addr.slice(-6);
+            }
+          }
+        })
+        .catch((e) => console.warn('[TonConnect] Restore failed:', e));
       
-      if (connected && tonConnectUI.wallet) {
-        state.walletAddress = tonConnectUI.wallet.account.address;
-        $('wallet-status')?.classList.remove('hidden');
-        $('wallet-connected')?.classList.remove('hidden');
-        $('btn-wallet-next').disabled = false;
-        
-        const addrDisplay = $('wallet-address-display');
-        if (addrDisplay) {
-          const addr = state.walletAddress;
-          addrDisplay.textContent = addr.slice(0, 6) + '...' + addr.slice(-6);
-        }
-      }
-      
-      console.log('[TonConnect] Init complete');
+      console.log('[TonConnect] Init started (non-blocking)');
     } catch (e) {
       console.error('[TonConnect] Init error:', e);
       showToast('Ошибка TonConnect: ' + e.message, 'error');
@@ -1131,8 +1137,8 @@
     initScreenTree();
     initScreenStrazh();
     
-    // Init TonConnect
-    await initTonConnect();
+    // Init TonConnect (non-blocking, runs in background)
+    initTonConnect();
     
     // Determine initial screen
     const initialScreen = determineInitialScreen();
