@@ -122,7 +122,7 @@ def _referrer_used_slots(referrer: UserProfile) -> int:
     Count occupied slots for referrer (NEW, PENDING, CONFIRMED participations).
     """
     return Participation.objects.filter(
-            referrer=referrer,
+        referrer=referrer,
         status__in=[ParticipationStatus.NEW, ParticipationStatus.PENDING, ParticipationStatus.CONFIRMED],
     ).count()
 
@@ -163,20 +163,26 @@ def _create_intent(
     if not referrer:
         raise ValueError("referrer_not_found")
     if referrer.id == user.id:
-            RiskEvent.objects.create(user=user, kind=RiskEventKind.SELF_REFERRAL, meta={"referrer_tid": referrer_telegram_id})
+        RiskEvent.objects.create(
+            user=user,
+            kind=RiskEventKind.SELF_REFERRAL,
+            meta={"referrer_tid": referrer_telegram_id},
+        )
         raise ValueError("self_referral")
 
-        # Check referrer has CONFIRMED participation
-        if not Participation.objects.filter(user=referrer, status=ParticipationStatus.CONFIRMED).exists():
-            raise ValueError("referrer_not_confirmed")
-        
-        # Check 3/3 slots
+    # Check referrer has CONFIRMED participation
+    if not Participation.objects.filter(user=referrer, status=ParticipationStatus.CONFIRMED).exists():
+        raise ValueError("referrer_not_confirmed")
+
+    # Check 3/3 slots
     used_slots = _referrer_used_slots(referrer)
     if used_slots >= 3:
-            RiskEvent.objects.create(user=user, kind=RiskEventKind.REF_LIMIT, meta={"referrer_tid": referrer_telegram_id, "slots": used_slots})
+        RiskEvent.objects.create(
+            user=user,
+            kind=RiskEventKind.REF_LIMIT,
+            meta={"referrer_tid": referrer_telegram_id, "slots": used_slots},
+        )
         raise RuntimeError("referrer_limit")
-    else:
-        used_slots = 0
 
     # Handle author code
     code = (author_code or "").strip() or None
@@ -244,7 +250,7 @@ def _decode_pubkey(public_key: str) -> bytes:
     try:
         if len(s) == 64 and all(c in "0123456789abcdefABCDEF" for c in s):
             return bytes.fromhex(s)
-        except Exception:
+    except Exception:
         pass
     b = _b64decode_padded(s)
     if len(b) != 32:
