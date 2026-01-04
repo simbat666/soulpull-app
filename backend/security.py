@@ -7,6 +7,13 @@ Headers:
 - X-Frame-Options
 - Referrer-Policy
 - Permissions-Policy
+
+TonConnect требует доступ к:
+- bridge.tonapi.io (HTTP Bridge)
+- tonapi.io (TON API)
+- connect.tonhubapi.com (Tonhub Bridge)
+- tonconnectbridge.mytonwallet.org (MyTonWallet Bridge)
+- Разные wallet apps для иконок
 """
 
 import os
@@ -23,22 +30,37 @@ class SecurityHeadersMiddleware:
     def __call__(self, request):
         response = self.get_response(request)
 
-        # CSP - allow TonConnect UI from CDN and all required endpoints
+        # CSP - МАКСИМАЛЬНО разрешающий для TonConnect
+        # TonConnect использует несколько bridge серверов и загружает иконки кошельков
         csp_parts = [
             "default-src 'self'",
+            # Scripts: CDN библиотеки + inline для Telegram WebApp
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://telegram.org",
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com",
+            # Styles: fonts + inline стили от TonConnect UI
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com https://cdn.jsdelivr.net",
+            # Fonts
             "font-src 'self' https://fonts.gstatic.com data:",
-            "img-src 'self' data: https: blob:",
-            "connect-src 'self' https: wss:",  # Allow all HTTPS/WSS for TonConnect bridges
-            "frame-src 'self' https://t.me https://telegram.org",
+            # Images: иконки кошельков могут быть откуда угодно
+            "img-src 'self' data: blob: https: http:",
+            # Connect: ВСЕ HTTPS/WSS для TonConnect bridges и wallets API
+            "connect-src 'self' https: wss: http:",
+            # Frames: Telegram
+            "frame-src 'self' https://t.me https://telegram.org https:",
+            # Workers
             "worker-src 'self' blob:",
+            # Object (для SVG и т.д.)
+            "object-src 'none'",
+            # Base URI
+            "base-uri 'self'",
         ]
         response["Content-Security-Policy"] = "; ".join(csp_parts)
 
-        # Other security headers
-        response["X-Content-Type-Options"] = "nosniff"
+        # Разрешаем загрузку в iframe из Telegram
+        # ВАЖНО: не DENY, а SAMEORIGIN или ALLOW-FROM для Telegram
         response["X-Frame-Options"] = "SAMEORIGIN"
+        
+        # Другие security headers
+        response["X-Content-Type-Options"] = "nosniff"
         response["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
 

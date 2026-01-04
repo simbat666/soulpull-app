@@ -249,104 +249,231 @@
   }
 
   // ============================================================================
-  // TON CONNECT
+  // TON CONNECT - ПОЛНАЯ РАБОЧАЯ ИНТЕГРАЦИЯ
   // ============================================================================
 
-  function initTonConnect() {
-    // Инициализация TonConnect БЕЗ блокировки UI
-    // Всё происходит асинхронно в фоне
-    
-    try {
-      const manifestUrl = window.location.origin + '/tonconnect-manifest.json';
-      console.log('[TonConnect] Init with manifest:', manifestUrl);
-      
-      // Определяем есть ли Telegram WebApp
-      const tg = window.Telegram?.WebApp;
-      const isTelegram = !!tg;
-      
-      tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
-        manifestUrl,
-        buttonRootId: 'ton-connect-button',
-        restoreConnection: true,
-        actionsConfiguration: {
-          // Для Telegram Mini App - вернуться в приложение после подтверждения
-          twaReturnUrl: isTelegram ? window.location.href : undefined,
-          returnStrategy: isTelegram ? 'back' : 'none',
-          // Показывать модалку подтверждения если не в Telegram
-          modals: isTelegram ? undefined : 'all',
-          // Пропускать редиректы на десктопе
-          skipRedirectToWallet: !isTelegram ? 'ios' : undefined,
-        },
-        uiPreferences: {
-          theme: 'DARK',
-        },
-        // Приоритизировать Telegram Wallet если в Telegram
-        walletsListConfiguration: isTelegram ? {
-          includeWallets: ['telegram-wallet', 'tonkeeper', 'mytonwallet'],
-        } : undefined,
-      });
-      
-      console.log('[TonConnect] Running in:', isTelegram ? 'Telegram Mini App' : 'Browser');
+  /**
+   * Проверка - работаем ли внутри Telegram Mini App
+   */
+  function isTelegramMiniApp() {
+    const tg = window.Telegram?.WebApp;
+    // Проверяем наличие initData или platform
+    return !!(tg && (tg.initData || tg.platform));
+  }
 
-      // Слушатель изменений — асинхронно, не блокирует
+  /**
+   * Инициализация TonConnect UI
+   * Работает как в браузере, так и в Telegram Mini App
+   */
+  function initTonConnect() {
+    try {
+      // Manifest URL должен быть абсолютным
+      const manifestUrl = window.location.origin + '/tonconnect-manifest.json';
+      const isTWA = isTelegramMiniApp();
+      
+      console.log('[TonConnect] ========================================');
+      console.log('[TonConnect] Init started');
+      console.log('[TonConnect] Manifest URL:', manifestUrl);
+      console.log('[TonConnect] Is Telegram Mini App:', isTWA);
+      console.log('[TonConnect] Window origin:', window.location.origin);
+      console.log('[TonConnect] ========================================');
+
+      // Конфигурация для TonConnect UI
+      const tcConfig = {
+        manifestUrl: manifestUrl,
+        buttonRootId: 'ton-connect-button',
+      };
+
+      // Настройки для Telegram Mini App
+      if (isTWA) {
+        tcConfig.actionsConfiguration = {
+          // returnStrategy: back — вернёт в Mini App после подтверждения в кошельке
+          returnStrategy: 'back',
+          // twaReturnUrl нужен для deeplinks
+          twaReturnUrl: window.location.href.split('?')[0],
+        };
+      }
+
+      // Создаём экземпляр
+      tonConnectUI = new TON_CONNECT_UI.TonConnectUI(tcConfig);
+
+      console.log('[TonConnect] Instance created:', !!tonConnectUI);
+
+      // Обработчик изменения статуса подключения
       tonConnectUI.onStatusChange((wallet) => {
-        console.log('[TonConnect] Status changed:', wallet ? 'connected' : 'disconnected');
+        console.log('[TonConnect] Status change:', wallet ? 'CONNECTED' : 'DISCONNECTED');
         
         if (wallet) {
+          // Кошелёк подключён
           state.walletAddress = wallet.account.address;
-          console.log('[TonConnect] Wallet:', state.walletAddress);
+          console.log('[TonConnect] Wallet address:', state.walletAddress);
+          console.log('[TonConnect] Wallet app:', wallet.device?.appName);
           
-          $('wallet-status')?.classList.remove('hidden');
-          $('wallet-connected')?.classList.remove('hidden');
-          const nextBtn = $('btn-wallet-next');
-          if (nextBtn) nextBtn.disabled = false;
+          updateWalletUI(true);
           
-          const addrDisplay = $('wallet-address-display');
-          if (addrDisplay) {
-            const addr = state.walletAddress;
-            addrDisplay.textContent = addr.slice(0, 6) + '...' + addr.slice(-6);
-          }
-          
+          // Регистрируем/линкуем кошелёк на бэкенде
           if (state.telegramId) {
-            registerAndLinkWallet(); // Без await
+            registerAndLinkWallet();
           }
           
           saveState();
         } else {
+          // Кошелёк отключён
           state.walletAddress = null;
-          $('wallet-status')?.classList.add('hidden');
-          $('wallet-connected')?.classList.add('hidden');
-          const nextBtn = $('btn-wallet-next');
-          if (nextBtn) nextBtn.disabled = true;
+          updateWalletUI(false);
           saveState();
         }
       });
 
-      // Восстановление сессии — в фоне, не блокирует UI
-      tonConnectUI.connectionRestored
-        .then((connected) => {
-          console.log('[TonConnect] Connection restored:', connected);
-          if (connected && tonConnectUI.wallet) {
-            state.walletAddress = tonConnectUI.wallet.account.address;
-            $('wallet-status')?.classList.remove('hidden');
-            $('wallet-connected')?.classList.remove('hidden');
-            const nextBtn = $('btn-wallet-next');
-            if (nextBtn) nextBtn.disabled = false;
-            
-            const addrDisplay = $('wallet-address-display');
-            if (addrDisplay) {
-              const addr = state.walletAddress;
-              addrDisplay.textContent = addr.slice(0, 6) + '...' + addr.slice(-6);
-            }
-          }
-        })
-        .catch((e) => console.warn('[TonConnect] Restore failed:', e));
+      // Восстановление сессии (async, не блокирует UI)
+      tonConnectUI.connectionRestored.then((restored) => {
+        console.log('[TonConnect] Connection restored:', restored);
+        if (restored && tonConnectUI.wallet) {
+          state.walletAddress = tonConnectUI.wallet.account.address;
+          updateWalletUI(true);
+        }
+      }).catch((err) => {
+        console.warn('[TonConnect] Restore error:', err);
+      });
+
+      console.log('[TonConnect] Init complete');
       
-      console.log('[TonConnect] Init started (non-blocking)');
-    } catch (e) {
-      console.error('[TonConnect] Init error:', e);
-      showToast('Ошибка TonConnect: ' + e.message, 'error');
+    } catch (err) {
+      console.error('[TonConnect] Init FATAL error:', err);
+      showToast('TonConnect ошибка: ' + err.message, 'error');
     }
+  }
+
+  /**
+   * Обновление UI кошелька
+   */
+  function updateWalletUI(connected) {
+    const walletStatus = $('wallet-status');
+    const walletConnected = $('wallet-connected');
+    const walletAddrDisplay = $('wallet-address-display');
+    const nextBtn = $('btn-wallet-next');
+
+    if (connected && state.walletAddress) {
+      walletStatus?.classList.remove('hidden');
+      walletConnected?.classList.remove('hidden');
+      if (nextBtn) nextBtn.disabled = false;
+      
+      if (walletAddrDisplay) {
+        const addr = state.walletAddress;
+        walletAddrDisplay.textContent = addr.slice(0, 6) + '...' + addr.slice(-6);
+      }
+    } else {
+      walletStatus?.classList.add('hidden');
+      walletConnected?.classList.add('hidden');
+      if (nextBtn) nextBtn.disabled = true;
+    }
+  }
+
+  /**
+   * Отправка транзакции через TonConnect
+   * Возвращает Promise с результатом
+   */
+  async function sendTonTransaction(toAddress, amountNano, comment = '') {
+    if (!tonConnectUI) {
+      throw new Error('TonConnect не инициализирован');
+    }
+
+    // Проверка подключения
+    if (!tonConnectUI.connected || !tonConnectUI.wallet) {
+      console.log('[Payment] Wallet not connected, opening modal...');
+      
+      // Открываем модалку подключения
+      await tonConnectUI.openModal();
+      
+      // Ждём подключения (максимум 2 минуты)
+      const connected = await waitForWalletConnection(120000);
+      if (!connected) {
+        throw new Error('Кошелёк не подключён');
+      }
+    }
+
+    console.log('[Payment] Sending transaction...');
+    console.log('[Payment] To:', toAddress);
+    console.log('[Payment] Amount:', amountNano, 'nanoTON');
+    console.log('[Payment] Comment:', comment);
+
+    // Формируем транзакцию
+    const transaction = {
+      validUntil: Math.floor(Date.now() / 1000) + 600, // 10 минут
+      messages: [
+        {
+          address: toAddress,
+          amount: String(amountNano),
+        }
+      ]
+    };
+
+    // Добавляем payload с комментарием если есть
+    if (comment) {
+      // Комментарий в формате BOC (base64)
+      // op=0 (text comment) + UTF-8 текст
+      transaction.messages[0].payload = createCommentPayload(comment);
+    }
+
+    console.log('[Payment] Transaction object:', JSON.stringify(transaction, null, 2));
+
+    // Отправляем
+    const result = await tonConnectUI.sendTransaction(transaction);
+    
+    console.log('[Payment] Transaction result:', result);
+    return result;
+  }
+
+  /**
+   * Создание payload с текстовым комментарием
+   * Возвращает base64 BOC
+   */
+  function createCommentPayload(text) {
+    // Простейший формат: 4 байта op-code (0 = text comment) + UTF-8 текст
+    const encoder = new TextEncoder();
+    const textBytes = encoder.encode(text);
+    
+    // Формируем массив байтов: 4 нулевых байта (op=0) + текст
+    const payload = new Uint8Array(4 + textBytes.length);
+    // op = 0x00000000 (text comment)
+    payload[0] = 0;
+    payload[1] = 0;
+    payload[2] = 0;
+    payload[3] = 0;
+    payload.set(textBytes, 4);
+    
+    // Кодируем в base64
+    return btoa(String.fromCharCode.apply(null, payload));
+  }
+
+  /**
+   * Ожидание подключения кошелька
+   */
+  function waitForWalletConnection(timeout = 60000) {
+    return new Promise((resolve) => {
+      // Если уже подключён
+      if (tonConnectUI.connected && tonConnectUI.wallet) {
+        resolve(true);
+        return;
+      }
+
+      const startTime = Date.now();
+      
+      const unsubscribe = tonConnectUI.onStatusChange((wallet) => {
+        if (wallet) {
+          unsubscribe();
+          resolve(true);
+        }
+      });
+
+      // Timeout
+      setTimeout(() => {
+        unsubscribe();
+        if (!tonConnectUI.connected) {
+          resolve(false);
+        }
+      }, timeout);
+    });
   }
 
   async function registerAndLinkWallet() {
@@ -632,117 +759,77 @@
       const btn = $('btn-pay-send');
       const originalText = btn.innerHTML;
       
+      console.log('[Payment] ========================================');
+      console.log('[Payment] PAY BUTTON CLICKED');
+      console.log('[Payment] TonConnect UI:', !!tonConnectUI);
+      console.log('[Payment] Connected:', tonConnectUI?.connected);
+      console.log('[Payment] Wallet:', tonConnectUI?.wallet?.account?.address);
+      console.log('[Payment] ========================================');
+      
       if (!tonConnectUI) {
-        showToast('TonConnect не инициализирован', 'error');
+        showToast('❌ TonConnect не инициализирован. Перезагрузи страницу.', 'error');
         return;
       }
       
-      // Подробная проверка подключения
-      console.log('[Payment] TonConnect state:', {
-        connected: tonConnectUI.connected,
-        wallet: tonConnectUI.wallet,
-        account: tonConnectUI.account,
-      });
-      
-      // Если кошелёк не подключён — подключить
-      if (!tonConnectUI.connected || !tonConnectUI.wallet) {
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Подключаем кошелёк...';
-        
-        try {
-          console.log('[Payment] Opening wallet connection modal...');
-          await tonConnectUI.openModal();
-          
-          // Ждём подключения
-          const wallet = await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Timeout')), 60000);
-            
-            if (tonConnectUI.connected && tonConnectUI.wallet) {
-              clearTimeout(timeout);
-              resolve(tonConnectUI.wallet);
-              return;
-            }
-            
-            const unsub = tonConnectUI.onStatusChange((w) => {
-              if (w) {
-                clearTimeout(timeout);
-                unsub();
-                resolve(w);
-              }
-            });
-          });
-          
-          console.log('[Payment] Wallet connected:', wallet);
-          state.walletAddress = wallet.account.address;
-          saveState();
-          showToast('✅ Кошелёк подключён!', 'success');
-          
-        } catch (e) {
-          console.error('[Payment] Connection error:', e);
-          showToast('Подключите кошелёк и попробуйте снова', 'error');
-          btn.disabled = false;
-          btn.innerHTML = originalText;
-          return;
-        }
-      }
-      
-      // Кошелёк подключён — отправляем транзакцию
       try {
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span> Отправляем...';
+        btn.innerHTML = '<span class="spinner"></span> Подготовка...';
         
-        // Receiver wallet address
+        // Адрес получателя
         const receiverWallet = CONFIG.RECEIVER_WALLET;
-        console.log('[Payment] Receiver wallet:', receiverWallet);
+        // Сумма в nanoTON (0.1 TON = 100000000 nanoTON)
+        const amountNano = 100000000;
+        // Комментарий
+        const comment = state.participationId ? `Soulpull:${state.participationId}` : 'Soulpull';
         
-        // Формируем транзакцию
-        const transaction = {
-          validUntil: Math.floor(Date.now() / 1000) + 600,
-          messages: [
-            {
-              address: receiverWallet,
-              amount: '100000000', // 0.1 TON
-            }
-          ],
-        };
+        console.log('[Payment] Receiver:', receiverWallet);
+        console.log('[Payment] Amount:', amountNano, 'nanoTON (', amountNano / 1e9, 'TON)');
+        console.log('[Payment] Comment:', comment);
         
-        console.log('[Payment] Transaction:', JSON.stringify(transaction, null, 2));
-        console.log('[Payment] Calling sendTransaction...');
+        // Показываем тост перед открытием кошелька
+        if (isTelegramMiniApp()) {
+          showToast('📱 Откроется кошелёк для подтверждения...', 'info');
+        } else {
+          showToast('📱 Подтверди транзакцию в кошельке!', 'info');
+        }
         
-        showToast('📱 Подтверди транзакцию в кошельке!', 'info');
+        btn.innerHTML = '<span class="spinner"></span> Открываем кошелёк...';
         
-        // Отправляем транзакцию
-        const result = await tonConnectUI.sendTransaction(transaction);
-        console.log('[Payment] SUCCESS! Result:', result);
+        // Отправляем транзакцию через нашу функцию
+        const result = await sendTonTransaction(receiverWallet, amountNano, comment);
         
-        // Show pending status
-        $('btn-pay-send')?.classList.add('hidden');
+        console.log('[Payment] ✅ SUCCESS!');
+        console.log('[Payment] Result:', result);
+        
+        // Успех! Показываем статус ожидания
+        btn.classList.add('hidden');
         $('payment-pending')?.classList.remove('hidden');
-        $('btn-payment-done').disabled = false;
+        const doneBtn = $('btn-payment-done');
+        if (doneBtn) doneBtn.disabled = false;
         
         showToast('✅ Транзакция отправлена! Ожидаем подтверждения.', 'success');
         
-      } catch (e) {
-        console.error('[Payment] Send error:', e);
-        console.error('[Payment] Error details:', {
-          name: e.name,
-          message: e.message,
-          code: e.code,
-          stack: e.stack,
-        });
+      } catch (err) {
+        console.error('[Payment] ❌ ERROR:', err);
+        console.error('[Payment] Error name:', err.name);
+        console.error('[Payment] Error message:', err.message);
         
+        // Определяем текст ошибки
         let errorMsg = 'Ошибка отправки';
-        if (e.message?.includes('Interrupted') || e.message?.includes('canceled') || e.message?.includes('reject')) {
-          errorMsg = 'Транзакция отменена пользователем';
-        } else if (e.message?.includes('timeout')) {
+        
+        const msg = err.message?.toLowerCase() || '';
+        if (msg.includes('reject') || msg.includes('cancel') || msg.includes('declined') || msg.includes('user')) {
+          errorMsg = 'Транзакция отменена';
+        } else if (msg.includes('timeout') || msg.includes('timed out')) {
           errorMsg = 'Время ожидания истекло';
-        } else if (e.message?.includes('User rejects')) {
-          errorMsg = 'Вы отменили транзакцию';
-        } else if (e.message) {
-          errorMsg = e.message;
+        } else if (msg.includes('not connected') || msg.includes('no wallet')) {
+          errorMsg = 'Кошелёк не подключён';
+        } else if (err.message) {
+          errorMsg = err.message;
         }
         
         showToast('❌ ' + errorMsg, 'error');
+        
         btn.disabled = false;
         btn.innerHTML = originalText;
       }
